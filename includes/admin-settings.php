@@ -1,5 +1,4 @@
 <?php
-// Añadir página de menú en el admin
 add_action('admin_menu', function() {
     add_menu_page(
         'Engel Sync',
@@ -12,43 +11,46 @@ add_action('admin_menu', function() {
     );
 });
 
-// Renderizar la página de administración
 function engel_sync_admin_page() {
-    // Guardar token si viene en POST
-    if (isset($_POST['engel_api_token'])) {
-        update_option('engel_api_token', sanitize_text_field($_POST['engel_api_token']));
-        echo '<div class="updated"><p>Token guardado correctamente.</p></div>';
+    if (isset($_POST['engel_user'], $_POST['engel_password'], $_POST['engel_do_login'])) {
+        $user = sanitize_text_field($_POST['engel_user']);
+        $pass = sanitize_text_field($_POST['engel_password']);
+        $token = engel_api_login($user, $pass);
+        if ($token) {
+            echo '<div class="updated"><p>Login correcto. Token guardado.</p></div>';
+        } else {
+            echo '<div class="error"><p>Login fallido. Verifica las credenciales.</p></div>';
+        }
     }
 
-    // Lanzar importación si se ha pulsado el botón
-    if (isset($_POST['engel_start_import'])) {
-        engel_start_import();
-        echo '<div class="updated"><p>Importación iniciada, revisa los logs o productos.</p></div>';
+    if (isset($_POST['engel_do_logout'])) {
+        if (engel_api_logout()) {
+            echo '<div class="updated"><p>Logout correcto. Token eliminado.</p></div>';
+        } else {
+            echo '<div class="error"><p>Error en logout o token no encontrado.</p></div>';
+        }
     }
 
     $token = get_option('engel_api_token', '');
     ?>
-
     <div class="wrap">
         <h1>Engel Sync Settings</h1>
-
         <form method="post" action="">
+            <h2>Login API Engel</h2>
             <table class="form-table">
                 <tr>
-                    <th scope="row"><label for="engel_api_token">Token API Engel</label></th>
-                    <td><input type="text" id="engel_api_token" name="engel_api_token" value="<?php echo esc_attr($token); ?>" size="50" required></td>
+                    <th><label for="engel_user">Usuario</label></th>
+                    <td><input type="text" id="engel_user" name="engel_user" value="" size="30" required></td>
+                </tr>
+                <tr>
+                    <th><label for="engel_password">Contraseña</label></th>
+                    <td><input type="password" id="engel_password" name="engel_password" value="" size="30" required></td>
                 </tr>
             </table>
-            <?php submit_button('Guardar Token'); ?>
+            <input type="submit" name="engel_do_login" value="Login" class="button button-primary" />
+            <input type="submit" name="engel_do_logout" value="Logout" class="button button-secondary" />
         </form>
-
-        <hr>
-
-        <form method="post" action="">
-            <input type="hidden" name="engel_start_import" value="1" />
-            <?php submit_button('Iniciar Importación Manual', 'primary'); ?>
-        </form>
+        <p><strong>Token actual:</strong> <?php echo esc_html($token ?: 'No hay token'); ?></p>
     </div>
-
     <?php
 }
