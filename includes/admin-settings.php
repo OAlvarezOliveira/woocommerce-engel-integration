@@ -1,4 +1,5 @@
 <?php
+// Añade la página de menú en admin
 add_action('admin_menu', function() {
     add_menu_page(
         'Engel Sync',
@@ -11,7 +12,9 @@ add_action('admin_menu', function() {
     );
 });
 
+// Página de administración
 function engel_sync_admin_page() {
+    // Procesar login
     if (isset($_POST['engel_user'], $_POST['engel_password'], $_POST['engel_do_login'])) {
         $user = sanitize_text_field($_POST['engel_user']);
         $pass = sanitize_text_field($_POST['engel_password']);
@@ -23,12 +26,19 @@ function engel_sync_admin_page() {
         }
     }
 
+    // Procesar logout
     if (isset($_POST['engel_do_logout'])) {
         if (engel_api_logout()) {
             echo '<div class="updated"><p>Logout correcto. Token eliminado.</p></div>';
         } else {
             echo '<div class="error"><p>Error en logout o token no encontrado.</p></div>';
         }
+    }
+
+    // Procesar importación manual
+    if (isset($_POST['engel_do_import'])) {
+        engel_sync_import_products_callback();
+        echo '<div class="updated"><p>Importación manual ejecutada. Consulta el log para detalles.</p></div>';
     }
 
     $token = get_option('engel_api_token', '');
@@ -50,6 +60,15 @@ function engel_sync_admin_page() {
             <input type="submit" name="engel_do_login" value="Login" class="button button-primary" />
             <input type="submit" name="engel_do_logout" value="Logout" class="button button-secondary" />
         </form>
+
+        <hr>
+
+        <form method="post" action="">
+            <h2>Importar Productos</h2>
+            <p>Ejecuta la importación manualmente sin esperar al cron.</p>
+            <input type="submit" name="engel_do_import" value="Importar ahora" class="button button-primary" />
+        </form>
+
         <p><strong>Token actual:</strong> <?php echo esc_html($token ?: 'No hay token'); ?></p>
     </div>
     <?php
