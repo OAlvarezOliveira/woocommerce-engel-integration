@@ -3,7 +3,7 @@
 
 trait Engel_Connection_Trait {
 
-    private $login_url = const LOGIN_URL = 'https://b2b.novaengel.com/api/login';
+    private $login_url = 'https://b2b.novaengel.com/api/login';
     private $token = null;
 
     /**
@@ -87,4 +87,3 @@ trait Engel_Connection_Trait {
         }
     }
 }
-

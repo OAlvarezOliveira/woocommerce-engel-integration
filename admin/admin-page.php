@@ -3,62 +3,105 @@ if (!defined('ABSPATH')) exit;
 
 function engel_sync_admin_page() {
     $sync = engel_get_sync_instance();
+    $message = '';
 
-    if ($_SERVER['REQUEST_METHOD'] === 'POST' && check_admin_referer('engel_sync_action', 'engel_sync_nonce')) {
+    // Procesar acciones enviadas por formulario
+    if (isset($_POST['action'])) {
+        check_admin_referer('engel_sync_action', 'engel_sync_nonce');
+
         try {
-            if (isset($_POST['login'])) {
-                $user = sanitize_text_field($_POST['engel_user']);
-                $pass = sanitize_text_field($_POST['engel_password']);
-                $sync->engel_login($user, $pass);
-                echo '<div class="notice notice-success"><p>Login exitoso.</p></div>';
-            }
-            if (isset($_POST['logout'])) {
-                $sync->clear_token();
-                echo '<div class="notice notice-success"><p>Logout exitoso.</p></div>';
-            }
-            if (isset($_POST['download_csv'])) {
-                $file_path = $sync->export_products_to_csv();
-                $url = wp_upload_dir()['baseurl'] . '/' . basename($file_path);
-                echo '<div class="notice notice-success"><p>CSV generado. <a href="' . esc_url($url) . '" target="_blank">Descargar CSV</a></p></div>';
-            }
-            if (isset($_POST['sync_now'])) {
-                $sync->run_full_sync();
-                echo '<div class="notice notice-success"><p>Sincronización completa ejecutada.</p></div>';
-            }
-            if (isset($_POST['sync_stock'])) {
-                $sync->run_stock_sync();
-                echo '<div class="notice notice-success"><p>Sincronización de stock ejecutada.</p></div>';
+            switch ($_POST['action']) {
+                case 'login':
+                    $user = sanitize_text_field($_POST['user'] ?? '');
+                    $pass = sanitize_text_field($_POST['password'] ?? '');
+                    $sync->engel_login($user, $pass);
+                    $message = "Login exitoso.";
+                    break;
+
+                case 'logout':
+                    $sync->clear_token();
+                    $message = "Logout realizado.";
+                    break;
+
+                case 'full_sync':
+                    $sync->run_full_sync();
+                    $message = "Sincronización completa realizada.";
+                    break;
+
+                case 'stock_sync':
+                    $sync->run_stock_sync();
+                    $message = "Sincronización de stock realizada.";
+                    break;
+
+                case 'export_csv':
+                    $file_path = $sync->export_products_to_csv();
+                    $url = wp_upload_dir()['baseurl'] . '/' . basename($file_path);
+                    $message = "CSV exportado correctamente. <a href='$url' target='_blank'>Descargar CSV</a>";
+                    break;
             }
         } catch (Exception $e) {
-            echo '<div class="notice notice-error"><p>Error: ' . esc_html($e->getMessage()) . '</p></div>';
+            $message = 'Error: ' . $e->getMessage();
         }
     }
 
+    // Obtener token para mostrar estado
     $token = $sync->get_token();
     ?>
-
     <div class="wrap">
         <h1>Engel WooCommerce Sync</h1>
+
+        <?php if ($message): ?>
+            <div class="notice notice-success is-dismissible"><p><?php echo wp_kses_post($message); ?></p></div>
+        <?php endif; ?>
+
+        <h2>Autenticación</h2>
+        <?php if ($token): ?>
+            <p><strong>Token actual:</strong> <?php echo esc_html($token); ?></p>
+            <form method="post">
+                <?php wp_nonce_field('engel_sync_action', 'engel_sync_nonce'); ?>
+                <input type="hidden" name="action" value="logout" />
+                <button type="submit" class="button button-secondary">Logout</button>
+            </form>
+        <?php else: ?>
+            <form method="post">
+                <?php wp_nonce_field('engel_sync_action', 'engel_sync_nonce'); ?>
+                <input type="hidden" name="action" value="login" />
+                <table class="form-table" role="presentation">
+                    <tbody>
+                        <tr>
+                            <th><label for="user">Usuario Engel</label></th>
+                            <td><input name="user" type="text" id="user" class="regular-text" required></td>
+                        </tr>
+                        <tr>
+                            <th><label for="password">Contraseña Engel</label></th>
+                            <td><input name="password" type="password" id="password" class="regular-text" required></td>
+                        </tr>
+                    </tbody>
+                </table>
+                <button type="submit" class="button button-primary">Login</button>
+            </form>
+        <?php endif; ?>
+
+        <h2>Sincronización</h2>
+        <form method="post" style="display:inline-block; margin-right:10px;">
+            <?php wp_nonce_field('engel_sync_action', 'engel_sync_nonce'); ?>
+            <input type="hidden" name="action" value="full_sync" />
+            <button type="submit" class="button button-primary">Sincronizar todos los productos</button>
+        </form>
+
+        <form method="post" style="display:inline-block; margin-right:10px;">
+            <?php wp_nonce_field('engel_sync_action', 'engel_sync_nonce'); ?>
+            <input type="hidden" name="action" value="stock_sync" />
+            <button type="submit" class="button button-secondary">Sincronizar solo stock</button>
+        </form>
+
+        <h2>Exportar productos</h2>
         <form method="post">
             <?php wp_nonce_field('engel_sync_action', 'engel_sync_nonce'); ?>
-
-            <h2>Login a Nova Engel</h2>
-            <label>Usuario: <input type="text" name="engel_user" required></label><br>
-            <label>Contraseña: <input type="password" name="engel_password" required></label><br>
-            <button type="submit" name="login" class="button button-primary">Login</button>
-
-            <h2>Acciones</h2>
-            <p>Token actual: <strong><?php echo $token ? esc_html($token) : 'No autenticado'; ?></strong></p>
-
-            <button type="submit" name="logout" class="button button-secondary">Logout</button><br><br>
-
-            <button type="submit" name="download_csv" class="button">Descargar CSV Productos</button><br><br>
-
-            <button type="submit" name="sync_now" class="button button-primary">Sincronizar todos los productos</button><br><br>
-
-            <button type="submit" name="sync_stock" class="button button-secondary">Actualizar solo stock</button>
+            <input type="hidden" name="action" value="export_csv" />
+            <button type="submit" class="button button-secondary">Exportar CSV</button>
         </form>
     </div>
-
     <?php
 }
+

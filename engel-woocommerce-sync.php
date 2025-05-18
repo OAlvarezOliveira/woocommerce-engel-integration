@@ -23,8 +23,7 @@ class Engel_Product_Sync {
     use Engel_WC_Sync_Trait;
 
     public function __construct() {
-        // Ya no llamamos a load_token() que no existe, usamos get_token()
-        $this->token = $this->get_token();
+        // Nada aquí, el token se gestiona en el trait
     }
 
     public function run_full_sync() {
@@ -70,22 +69,47 @@ class Engel_Product_Sync {
         return $file_path;
     }
 
-    // Debes definir este método para que la sincronización funcione
     public function get_all_products($limit = 0, $language = 'es') {
-        // Aquí debes implementar la lógica para obtener los productos de la API Nova Engel
-        // Por ejemplo, llamar a una API con $this->token y devolver un array de productos
+        $token = $this->get_token();
+        if (!$token) {
+            throw new Exception('Token de autenticación no disponible');
+        }
 
-        // Por ahora, ejemplo estático:
-        return [
-            [
-                'id' => 1,
-                'sku' => 'SKU001',
-                'name' => 'Producto de prueba',
-                'description' => 'Descripción del producto',
-                'price' => 100,
-                'stock' => 10
+        $url = "https://b2b.novaengel.com/api/products?lang=$language";
+        if ($limit > 0) {
+            $url .= "&limit=$limit";
+        }
+
+        $response = wp_remote_get($url, [
+            'headers' => [
+                'Authorization' => "Bearer $token",
+                'Accept' => 'application/json',
             ],
-        ];
+            'timeout' => 30,
+        ]);
+
+        if (is_wp_error($response)) {
+            $this->log("Error al obtener productos: " . $response->get_error_message());
+            return [];
+        }
+
+        $body = wp_remote_retrieve_body($response);
+        $data = json_decode($body, true);
+
+        if (!is_array($data)) {
+            $this->log("Respuesta inválida al obtener productos: $body");
+            return [];
+        }
+
+        return $data;
+    }
+
+    private function log(string $message) {
+        if (function_exists('engel_log')) {
+            engel_log($message);
+        } else {
+            error_log('[Engel Sync] ' . $message);
+        }
     }
 }
 
