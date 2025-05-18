@@ -23,19 +23,20 @@ class Engel_Product_Sync {
     use Engel_WC_Sync_Trait;
 
     public function __construct() {
-        $this->load_token();
+        // No cargamos token en constructor para evitar errores
+        // Se carga cuando se llama a get_token()
     }
 
     public function run_full_sync() {
         $products = $this->get_all_products();
         $this->sync_all_products_to_wc($products);
-        $this->log('Sincronización completa finalizada.');
+        $this->engel_log('Sincronización completa finalizada.');
     }
 
     public function run_stock_sync() {
         $products = $this->get_all_products();
         $this->sync_stock_only_to_wc($products);
-        $this->log('Sincronización de stock finalizada.');
+        $this->engel_log('Sincronización de stock finalizada.');
     }
 
     public function export_products_to_csv($filename = 'engel_products.csv', $language = 'es') {
@@ -64,9 +65,53 @@ class Engel_Product_Sync {
         }
 
         fclose($file);
-        $this->log("CSV exportado: $file_path");
+        $this->engel_log("CSV exportado: $file_path");
 
         return $file_path;
+    }
+
+    /**
+     * Obtiene todos los productos paginados desde la API Engel.
+     *
+     * @param int $elements Número de elementos por página (default 100)
+     * @param string $language Idioma para la API (default 'es')
+     * @return array Lista de productos
+     */
+    public function get_all_products($elements = 100, $language = 'es') {
+        $token = $this->get_token();
+        if (!$token) {
+            throw new Exception('No autenticado. Por favor, haga login primero.');
+        }
+
+        $products = [];
+        $page = 0;
+
+        do {
+            $url = "https://b2b.novaengel.com/api/products/paging/$token/$page/$elements/$language";
+            $response = wp_remote_get($url, ['timeout' => 20]);
+
+            if (is_wp_error($response)) {
+                throw new Exception('Error al obtener productos: ' . $response->get_error_message());
+            }
+
+            $code = wp_remote_retrieve_response_code($response);
+            $body = wp_remote_retrieve_body($response);
+
+            if ($code !== 200) {
+                throw new Exception("Error HTTP $code al obtener productos");
+            }
+
+            $data = json_decode($body, true);
+            if (!is_array($data)) {
+                throw new Exception('Respuesta no válida al obtener productos.');
+            }
+
+            $count = count($data);
+            $products = array_merge($products, $data);
+            $page++;
+        } while ($count === $elements);
+
+        return $products;
     }
 }
 

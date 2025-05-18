@@ -1,18 +1,11 @@
 <?php
-// trait-engel-connection.php
+if (!defined('ABSPATH')) exit;
 
 trait Engel_Connection_Trait {
 
-    private $login_url = 'https://drop.novaengel.com/api/login'; // URL corregida
+    private $login_url = 'https://drop.novaengel.com/api/login';
     private $token = null;
 
-    /**
-     * Realiza login en la API de Nova Engel y guarda el token en WP options.
-     *
-     * @param string $user Usuario de Engel
-     * @param string $password Contraseña de Engel
-     * @throws Exception Si falla la petición o no se recibe token
-     */
     public function engel_login($user, $password) {
         $body = json_encode([
             'user' => $user,
@@ -20,9 +13,7 @@ trait Engel_Connection_Trait {
         ]);
 
         $response = wp_remote_post($this->login_url, [
-            'headers' => [
-                'Content-Type' => 'application/json'
-            ],
+            'headers' => ['Content-Type' => 'application/json'],
             'body' => $body,
             'timeout' => 20,
         ]);
@@ -44,7 +35,6 @@ trait Engel_Connection_Trait {
 
         $data = json_decode($body_response, true);
 
-        // Cambiado a 'Token' con T mayúscula
         if (empty($data['Token'])) {
             throw new Exception('No se recibió token en login');
         }
@@ -54,11 +44,6 @@ trait Engel_Connection_Trait {
         $this->engel_log("Login exitoso. Token guardado.");
     }
 
-    /**
-     * Obtiene el token guardado en opciones WP.
-     *
-     * @return string|null
-     */
     public function get_token() {
         if ($this->token) {
             return $this->token;
@@ -68,23 +53,16 @@ trait Engel_Connection_Trait {
         return $this->token;
     }
 
-    /**
-     * Limpia el token guardado (logout local).
-     */
     public function clear_token() {
         $this->token = null;
         delete_option('engel_api_token');
         $this->engel_log("Token eliminado (logout).");
     }
 
-    /**
-     * Función para registrar logs si WP_DEBUG está activo.
-     *
-     * @param string $message Mensaje a registrar
-     */
     private function engel_log($message) {
         if (defined('WP_DEBUG') && WP_DEBUG) {
             error_log('[Engel Sync] ' . $message);
         }
     }
 }
+

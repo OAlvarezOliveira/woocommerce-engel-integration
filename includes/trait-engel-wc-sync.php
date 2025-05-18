@@ -42,7 +42,7 @@ trait Engel_WC_Sync_Trait {
         $product->set_stock_status($stock > 0 ? 'instock' : 'outofstock');
         $product->save();
 
-        $this->log("Producto sincronizado SKU: $sku");
+        $this->engel_log("Producto sincronizado SKU: $sku");
     }
 
     private function clean_text(string $text) {
@@ -53,11 +53,8 @@ trait Engel_WC_Sync_Trait {
         return (isset($product_data['price']) && $product_data['price'] > 50);
     }
 
-    private function log(string $message) {
+    private function engel_log(string $message) {
         if (function_exists('engel_log')) {
             engel_log($message);
         } else {
-            error_log('[Engel Sync] ' . $message);
-        }
-    }
-}
+            error_log('[Engel
