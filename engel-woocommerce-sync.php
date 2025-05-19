@@ -48,17 +48,27 @@ class Engel_Product_Sync {
             throw new Exception('No se pudo crear archivo CSV');
         }
 
-        $headers = ['ID', 'SKU', 'Nombre', 'Descripción', 'Precio', 'Stock'];
+        // Encabezados
+        $headers = [
+            'ID', 'SKU', 'Nombre', 'Descripción corta', 'Descripción larga',
+            'Precio', 'Stock', 'Marca', 'EAN', 'Categoría', 'IVA', 'Peso (kg)'
+        ];
         fputcsv($file, $headers);
 
         foreach ($products as $p) {
             $row = [
-                $p['id'] ?? '',
-                $p['sku'] ?? ($p['id'] ?? ''),
-                $p['name'] ?? '',
-                $p['description'] ?? '',
-                $p['price'] ?? '',
-                $p['stock'] ?? '',
+                $p['Id'] ?? '',
+                $p['ItemId'] ?? ($p['Id'] ?? ''),
+                $p['Description'] ?? '',
+                mb_substr(strip_tags($p['CompleteDescription'] ?? ''), 0, 120),
+                $p['CompleteDescription'] ?? '',
+                $p['Price'] ?? '',
+                $p['Stock'] ?? '',
+                $p['BrandName'] ?? '',
+                isset($p['EANs']) ? implode(', ', $p['EANs']) : '',
+                isset($p['Families']) ? implode(', ', $p['Families']) : '',
+                $p['IVA'] ?? '',
+                $p['Kgs'] ?? ''
             ];
             fputcsv($file, $row);
         }
@@ -69,53 +79,53 @@ class Engel_Product_Sync {
         return $file_path;
     }
 
-    public function get_all_products($limit = 100, $language = 'es') {
+    public function get_all_products($limit = 0, $language = 'es') {
         $token = $this->get_token();
         if (!$token) {
             throw new Exception('Token de autenticación no disponible');
         }
 
-        $products = [];
         $page = 0;
-
+        $all_products = [];
+        $elements = $limit > 0 ? $limit : 100; // elementos por página
         do {
-            $url = "https://drop.novaengel.com/api/products/paging/{$token}/{$page}/{$limit}/{$language}";
-            $response = wp_remote_get($url, ['timeout' => 30]);
+            $url = "https://drop.novaengel.com/api/products/paging/{$token}/{$page}/{$elements}/{$language}";
+            $response = wp_remote_get($url, [
+                'headers' => [
+                    'Authorization' => "Bearer $token",
+                    'Accept' => 'application/json',
+                ],
+                'timeout' => 30,
+            ]);
 
             if (is_wp_error($response)) {
-                $this->log("Error al obtener productos (página {$page}): " . $response->get_error_message());
+                $this->log("Error al obtener productos: " . $response->get_error_message());
                 break;
             }
 
-            $code = wp_remote_retrieve_response_code($response);
             $body = wp_remote_retrieve_body($response);
-
-            $this->log("GET productos página {$page}, código HTTP: {$code}");
-
-            if ($code !== 200) {
-                $this->log("Error de respuesta en página {$page}: $body");
-                break;
-            }
-
             $data = json_decode($body, true);
 
             if (!is_array($data) || empty($data)) {
-                $this->log("Página {$page} vacía o con datos inválidos");
                 break;
             }
 
-            $products = array_merge($products, $data);
+            $all_products = array_merge($all_products, $data);
 
-            if (count($data) < $limit) {
-                // Fin de los datos
+            // Si la cantidad de productos obtenidos es menor que los pedidos, se acabaron
+            if (count($data) < $elements) {
                 break;
             }
 
             $page++;
+        } while ($limit == 0 || count($all_products) < $limit);
 
-        } while (true);
+        // Si se definió un límite, recortar la lista
+        if ($limit > 0) {
+            $all_products = array_slice($all_products, 0, $limit);
+        }
 
-        return $products;
+        return $all_products;
     }
 
     private function log(string $message) {
