@@ -2,7 +2,7 @@
 /*
 Plugin Name: Engel WooCommerce Sync
 Description: Sincroniza productos de Nova Engel con WooCommerce, login/logout y descarga CSV.
-Version: 1.3
+Version: 1.4
 Author: OAlvarezOliveira
 */
 
@@ -14,17 +14,55 @@ $base = plugin_dir_path(__FILE__);
 require_once $base . 'includes/trait-engel-connection.php';
 require_once $base . 'includes/trait-engel-wc-sync.php';
 
+// Carga clase para exportación background
+require_once $base . 'includes/class-engel-export-background.php';
+
 // Carga página admin
 require_once $base . 'admin/admin-page.php';
 
-// Clase principal que usa traits
+// Añadir página de configuración
+add_action('admin_menu', function () {
+    add_options_page('Engel Sync Config', 'Engel Sync Config', 'manage_options', 'engel-sync-settings', 'engel_sync_settings_page');
+});
+
+function engel_sync_settings_page() {
+    ?>
+    <div class="wrap">
+        <h1>Configuración de Engel Sync</h1>
+        <form method="post" action="options.php">
+            <?php
+            settings_fields('engel_sync_settings');
+            do_settings_sections('engel_sync_settings');
+            submit_button();
+            ?>
+        </form>
+    </div>
+    <?php
+}
+
+add_action('admin_init', function () {
+    register_setting('engel_sync_settings', 'engel_elements_per_page');
+    register_setting('engel_sync_settings', 'engel_max_pages');
+
+    add_settings_section('engel_sync_section', 'Paginación para exportación CSV', null, 'engel_sync_settings');
+
+    add_settings_field('engel_elements_per_page', 'Productos por página', function () {
+        $value = get_option('engel_elements_per_page', 100);
+        echo "<input type='number' name='engel_elements_per_page' value='" . esc_attr($value) . "' min='1' max='500' />";
+    }, 'engel_sync_settings', 'engel_sync_section');
+
+    add_settings_field('engel_max_pages', 'Máximo de páginas', function () {
+        $value = get_option('engel_max_pages', 200);
+        echo "<input type='number' name='engel_max_pages' value='" . esc_attr($value) . "' min='1' max='1000' />";
+    }, 'engel_sync_settings', 'engel_sync_section');
+});
+
+// Clase principal
 class Engel_Product_Sync {
     use Engel_Connection_Trait;
     use Engel_WC_Sync_Trait;
 
-    public function __construct() {
-        // Nada aquí, el token se gestiona en el trait
-    }
+    public function __construct() {}
 
     public function run_full_sync() {
         $products = $this->get_all_products();
@@ -39,7 +77,10 @@ class Engel_Product_Sync {
     }
 
     public function export_products_to_csv($filename = 'engel_products.csv', $language = 'es') {
-        $products = $this->get_all_products();
+        $elements_per_page = intval(get_option('engel_elements_per_page', 100));
+        $max_pages = intval(get_option('engel_max_pages', 200));
+
+        $products = $this->get_all_products($elements_per_page, $language, $max_pages);
         $this->log("Exportando " . count($products) . " productos a CSV");
 
         $upload_dir = wp_upload_dir();
@@ -77,39 +118,34 @@ class Engel_Product_Sync {
     }
 
     /**
-     * Obtiene todos los productos paginados, con límite configurable.
+     * Obtiene todos los productos paginados, con límite de páginas.
      *
-     * @return array
-     * @throws Exception
+     * @param int $elements_per_page Número de productos por página.
+     * @param string $language Código de idioma.
+     * @param int $max_pages Límite máximo de páginas a solicitar.
+     * @return array Todos los productos obtenidos.
+     * @throws Exception Si no hay token válido.
      */
-    public function get_all_products() {
+    public function get_all_products($elements_per_page = 100, $language = 'es', $max_pages = 200) {
         $token = $this->get_token();
         if (!$token) {
             throw new Exception('Token de autenticación no disponible');
         }
 
-        $elements_per_page = (int) get_option('engel_elements_per_page', 10);
-        $max_pages = (int) get_option('engel_max_pages', 5);
-
         $all_products = [];
         $page = 0;
 
         do {
-            if ($page >= $max_pages) {
-                $this->log("Límite máximo de páginas ($max_pages) alcanzado.");
-                break;
-            }
+            $url = "https://drop.novaengel.com/api/products/paging/{$token}/{$page}/{$elements_per_page}/{$language}";
 
-            $url = "https://drop.novaengel.com/api/products/paging/{$token}/{$page}/{$elements_per_page}/es";
-
-            $this->log("Solicitando página $page con $elements_per_page productos por página.");
+            $this->log("Requesting page $page, $elements_per_page productos");
 
             $response = wp_remote_get($url, [
                 'headers' => [
                     'Authorization' => "Bearer $token",
                     'Accept' => 'application/json',
                 ],
-                'timeout' => 30,
+                'timeout' => 60,
             ]);
 
             if (is_wp_error($response)) {
@@ -129,10 +165,9 @@ class Engel_Product_Sync {
             $this->log("Página $page: recibidos $count productos");
 
             $all_products = array_merge($all_products, $data);
-
             $page++;
 
-        } while ($count === $elements_per_page);
+        } while ($count === $elements_per_page && $page < $max_pages);
 
         $this->log("Total productos obtenidos: " . count($all_products));
 
@@ -155,7 +190,7 @@ function engel_log($message) {
     }
 }
 
-// Instancia del plugin para usar en acciones
+// Instancia única
 function engel_get_sync_instance() {
     static $instance = null;
     if ($instance === null) {
@@ -164,62 +199,7 @@ function engel_get_sync_instance() {
     return $instance;
 }
 
-// Añade menú en admin
+// Menú admin principal
 add_action('admin_menu', function () {
     add_menu_page('Engel Sync', 'Engel Sync', 'manage_options', 'engel-sync', 'engel_sync_admin_page');
 });
-
-// Añade página de ajustes para configuración de paginación
-add_action('admin_menu', function () {
-    add_submenu_page(
-        'engel-sync',
-        'Configuración de Paginación',
-        'Configuración Paginación',
-        'manage_options',
-        'engel-sync-settings',
-        'engel_sync_settings_page'
-    );
-});
-
-// Página de configuración para elementos por página y páginas máximas
-function engel_sync_settings_page() {
-    if (!current_user_can('manage_options')) {
-        wp_die('No tienes permisos para acceder a esta página.');
-    }
-
-    if (isset($_POST['submit'])) {
-        check_admin_referer('engel_sync_settings_nonce');
-
-        $elements_per_page = max(1, intval($_POST['engel_elements_per_page']));
-        $max_pages = max(1, intval($_POST['engel_max_pages']));
-
-        update_option('engel_elements_per_page', $elements_per_page);
-        update_option('engel_max_pages', $max_pages);
-
-        echo '<div class="notice notice-success is-dismissible"><p>Configuración guardada correctamente.</p></div>';
-    }
-
-    $elements_per_page = get_option('engel_elements_per_page', 10);
-    $max_pages = get_option('engel_max_pages', 5);
-    ?>
-    <div class="wrap">
-        <h1>Configuración de Paginación - Engel Sync</h1>
-        <form method="post">
-            <?php wp_nonce_field('engel_sync_settings_nonce'); ?>
-            <table class="form-table">
-                <tr>
-                    <th scope="row"><label for="engel_elements_per_page">Productos por página</label></th>
-                    <td><input name="engel_elements_per_page" type="number" id="engel_elements_per_page" value="<?php echo esc_attr($elements_per_page); ?>" min="1" max="1000" required></td>
-                </tr>
-                <tr>
-                    <th scope="row"><label for="engel_max_pages">Número máximo de páginas</label></th>
-                    <td><input name="engel_max_pages" type="number" id="engel_max_pages" value="<?php echo esc_attr($max_pages); ?>" min="1" max="100" required></td>
-                </tr>
-            </table>
-            <p class="submit">
-                <button type="submit" name="submit" class="button button-primary">Guardar cambios</button>
-            </p>
-        </form>
-    </div>
-    <?php
-}

@@ -32,12 +32,6 @@ function engel_sync_admin_page() {
                     $message = "Sincronización de stock realizada.";
                     break;
 
-                case 'export_csv':
-                    $file_path = $sync->export_products_to_csv();
-                    $url = wp_upload_dir()['baseurl'] . '/' . basename($file_path);
-                    $message = "CSV exportado correctamente. <a href='$url' target='_blank'>Descargar CSV</a>";
-                    break;
-
                 case 'save_pagination_settings':
                     $elements_per_page = intval($_POST['elements_per_page'] ?? 10);
                     $max_pages = intval($_POST['max_pages'] ?? 5);
@@ -59,14 +53,19 @@ function engel_sync_admin_page() {
     }
 
     $token = $sync->get_token();
+
+    // Obtener estado exportación
+    $export_in_progress = get_option('engel_export_in_progress', false);
+    $export_page = get_option('engel_export_page', 0);
+    $export_filename = get_option('engel_export_filename');
+    $export_url = $export_filename ? wp_upload_dir()['baseurl'] . '/' . $export_filename : '';
+
     ?>
     <div class="wrap">
         <h1>Engel WooCommerce Sync</h1>
 
         <?php if ($message): ?>
-            <div class="notice notice-success is-dismissible">
-                <p><?php echo wp_kses_post($message); ?></p>
-            </div>
+            <div class="notice notice-success is-dismissible"><p><?php echo wp_kses_post($message); ?></p></div>
         <?php endif; ?>
 
         <h2>Autenticación</h2>
@@ -115,11 +114,14 @@ function engel_sync_admin_page() {
         <hr>
 
         <h2>Exportar productos</h2>
-        <form method="post">
-            <?php wp_nonce_field('engel_sync_action', 'engel_sync_nonce'); ?>
-            <input type="hidden" name="action" value="export_csv" />
-            <button type="submit" class="button button-secondary">Exportar a CSV</button>
-        </form>
+        <button id="start-export" class="button button-secondary" <?php echo $export_in_progress ? 'disabled' : ''; ?>>
+            <?php echo $export_in_progress ? 'Exportación en progreso...' : 'Exportar a CSV'; ?>
+        </button>
+        <div id="export-progress" style="margin-top:10px;"></div>
+
+        <?php if (!$export_in_progress && $export_url): ?>
+            <p>Archivo generado: <a href="<?php echo esc_url($export_url); ?>" target="_blank">Descargar CSV</a></p>
+        <?php endif; ?>
 
         <hr>
 
@@ -141,9 +143,99 @@ function engel_sync_admin_page() {
             </table>
             <button type="submit" class="button button-primary">Guardar configuración</button>
         </form>
-
     </div>
+
+    <script>
+    (function($){
+        $('#start-export').on('click', function(e) {
+            e.preventDefault();
+            var $btn = $(this);
+            var $progress = $('#export-progress');
+
+            $btn.prop('disabled', true);
+            $progress.text('Iniciando exportación...');
+
+            // Iniciar exportación: llamada AJAX para start_export
+            $.post(ajaxurl, {
+                action: 'engel_start_export',
+                _ajax_nonce: '<?php echo wp_create_nonce("engel_export_nonce"); ?>'
+            }).done(function(response) {
+                if(response.success) {
+                    processPage(0);
+                } else {
+                    $progress.text('Error: ' + response.data);
+                    $btn.prop('disabled', false);
+                }
+            }).fail(function() {
+                $progress.text('Error al iniciar exportación.');
+                $btn.prop('disabled', false);
+            });
+
+            function processPage(page) {
+                $progress.text('Procesando página ' + (page + 1) + '...');
+
+                $.post(ajaxurl, {
+                    action: 'engel_process_export_page',
+                    page: page,
+                    _ajax_nonce: '<?php echo wp_create_nonce("engel_export_nonce"); ?>'
+                }).done(function(response) {
+                    if(response.success) {
+                        if(response.data.next_page !== false) {
+                            processPage(response.data.next_page);
+                        } else {
+                            $progress.html('Exportación finalizada. <a href="' + response.data.url + '" target="_blank">Descargar CSV</a>');
+                            $btn.prop('disabled', false);
+                        }
+                    } else {
+                        $progress.text('Error: ' + response.data);
+                        $btn.prop('disabled', false);
+                    }
+                }).fail(function() {
+                    $progress.text('Error durante la exportación.');
+                    $btn.prop('disabled', false);
+                });
+            }
+        });
+    })(jQuery);
+    </script>
     <?php
 }
 
+add_action('wp_ajax_engel_start_export', function() {
+    check_ajax_referer('engel_export_nonce');
 
+    try {
+        $elements_per_page = intval(get_option('engel_elements_per_page', 100));
+        $max_pages = intval(get_option('engel_max_pages', 200));
+
+        $exporter = new Engel_Export_Background($elements_per_page, $max_pages);
+        $exporter->start_export();
+
+        wp_send_json_success();
+    } catch (Exception $e) {
+        wp_send_json_error($e->getMessage());
+    }
+});
+
+add_action('wp_ajax_engel_process_export_page', function() {
+    check_ajax_referer('engel_export_nonce');
+
+    try {
+        $page = isset($_POST['page']) ? intval($_POST['page']) : 0;
+        $elements_per_page = intval(get_option('engel_elements_per_page', 100));
+        $max_pages = intval(get_option('engel_max_pages', 200));
+
+        $exporter = new Engel_Export_Background($elements_per_page, $max_pages);
+        $has_more = $exporter->process_page($page);
+
+        $filename = get_option('engel_export_filename');
+        $url = $filename ? wp_upload_dir()['baseurl'] . '/' . $filename : '';
+
+        wp_send_json_success([
+            'next_page' => $has_more ? $page + 1 : false,
+            'url' => $url
+        ]);
+    } catch (Exception $e) {
+        wp_send_json_error($e->getMessage());
+    }
+});
