@@ -27,11 +27,6 @@ function engel_sync_admin_page() {
                     $message = "Sincronización completa realizada.";
                     break;
 
-                case 'stock_sync':
-                    $sync->run_stock_sync();
-                    $message = "Sincronización de stock realizada.";
-                    break;
-
                 case 'save_pagination_settings':
                     $elements_per_page = intval($_POST['elements_per_page'] ?? 10);
                     $max_pages = intval($_POST['max_pages'] ?? 5);
@@ -53,13 +48,11 @@ function engel_sync_admin_page() {
     }
 
     $token = $sync->get_token();
-
-    // Obtener estado exportación
     $export_in_progress = get_option('engel_export_in_progress', false);
-    $export_page = get_option('engel_export_page', 0);
     $export_filename = get_option('engel_export_filename');
     $export_url = $export_filename ? wp_upload_dir()['baseurl'] . '/' . $export_filename : '';
-
+    $stock_sync_in_progress = get_option('engel_stock_sync_in_progress', false);
+    $stock_sync_log_url = get_option('engel_stock_sync_log_url', '');
     ?>
     <div class="wrap">
         <h1>Engel WooCommerce Sync</h1>
@@ -105,11 +98,13 @@ function engel_sync_admin_page() {
             <button type="submit" class="button button-primary">Sincronizar todos los productos</button>
         </form>
 
-        <form method="post" style="display:inline-block;">
-            <?php wp_nonce_field('engel_sync_action', 'engel_sync_nonce'); ?>
-            <input type="hidden" name="action" value="stock_sync" />
-            <button type="submit" class="button button-secondary">Sincronizar solo stock</button>
-        </form>
+        <button id="start-stock-sync" class="button button-secondary" <?php echo $stock_sync_in_progress ? 'disabled' : ''; ?>>
+            <?php echo $stock_sync_in_progress ? 'Sincronización en curso...' : 'Sincronizar solo stock'; ?>
+        </button>
+        <div id="stock-sync-progress" style="margin-top:10px;"></div>
+        <?php if ($stock_sync_log_url): ?>
+            <p>Último log: <a href="<?php echo esc_url($stock_sync_log_url); ?>" target="_blank">Descargar log</a></p>
+        <?php endif; ?>
 
         <hr>
 
@@ -118,7 +113,6 @@ function engel_sync_admin_page() {
             <?php echo $export_in_progress ? 'Exportación en progreso...' : 'Exportar a CSV'; ?>
         </button>
         <div id="export-progress" style="margin-top:10px;"></div>
-
         <?php if (!$export_in_progress && $export_url): ?>
             <p>Archivo generado: <a href="<?php echo esc_url($export_url); ?>" target="_blank">Descargar CSV</a></p>
         <?php endif; ?>
@@ -155,7 +149,6 @@ function engel_sync_admin_page() {
             $btn.prop('disabled', true);
             $progress.text('Iniciando exportación...');
 
-            // Iniciar exportación: llamada AJAX para start_export
             $.post(ajaxurl, {
                 action: 'engel_start_export',
                 _ajax_nonce: '<?php echo wp_create_nonce("engel_export_nonce"); ?>'
@@ -196,9 +189,58 @@ function engel_sync_admin_page() {
                 });
             }
         });
+
+        $('#start-stock-sync').on('click', function(e) {
+            e.preventDefault();
+            var $btn = $(this);
+            var $progress = $('#stock-sync-progress');
+
+            $btn.prop('disabled', true);
+            $progress.text('Iniciando sincronización...');
+
+            $.post(ajaxurl, {
+                action: 'engel_start_stock_sync',
+                _ajax_nonce: '<?php echo wp_create_nonce("engel_stock_sync_nonce"); ?>'
+            }).done(function(response) {
+                if(response.success) {
+                    processStockPage(0);
+                } else {
+                    $progress.text('Error: ' + response.data);
+                    $btn.prop('disabled', false);
+                }
+            }).fail(function() {
+                $progress.text('Error al iniciar sincronización.');
+                $btn.prop('disabled', false);
+            });
+
+            function processStockPage(page) {
+                $progress.text('Procesando página ' + (page + 1) + '...');
+
+                $.post(ajaxurl, {
+                    action: 'engel_process_stock_page',
+                    page: page,
+                    _ajax_nonce: '<?php echo wp_create_nonce("engel_stock_sync_nonce"); ?>'
+                }).done(function(response) {
+                    if(response.success) {
+                        if(response.data.next_page !== false) {
+                            processStockPage(response.data.next_page);
+                        } else {
+                            $progress.html('Sincronización finalizada. <a href="' + response.data.log_url + '" target="_blank">Descargar log</a>');
+                            $btn.prop('disabled', false);
+                        }
+                    } else {
+                        $progress.text('Error: ' + response.data);
+                        $btn.prop('disabled', false);
+                    }
+                }).fail(function() {
+                    $progress.text('Error durante sincronización.');
+                    $btn.prop('disabled', false);
+                });
+            }
+        });
     })(jQuery);
     </script>
-    <?php
+<?php
 }
 
 add_action('wp_ajax_engel_start_export', function() {
@@ -234,6 +276,41 @@ add_action('wp_ajax_engel_process_export_page', function() {
         wp_send_json_success([
             'next_page' => $has_more ? $page + 1 : false,
             'url' => $url
+        ]);
+    } catch (Exception $e) {
+        wp_send_json_error($e->getMessage());
+    }
+});
+
+add_action('wp_ajax_engel_start_stock_sync', function() {
+    check_ajax_referer('engel_stock_sync_nonce');
+
+    try {
+        $elements_per_page = intval(get_option('engel_elements_per_page', 100));
+        $max_pages = intval(get_option('engel_max_pages', 200));
+
+        $sync = engel_get_sync_instance();
+        $sync->init_stock_sync($elements_per_page, $max_pages);
+
+        wp_send_json_success();
+    } catch (Exception $e) {
+        wp_send_json_error($e->getMessage());
+    }
+});
+
+add_action('wp_ajax_engel_process_stock_page', function() {
+    check_ajax_referer('engel_stock_sync_nonce');
+
+    try {
+        $page = isset($_POST['page']) ? intval($_POST['page']) : 0;
+        $sync = engel_get_sync_instance();
+
+        $has_more = $sync->process_stock_sync_page($page);
+        $log_url = get_option('engel_stock_sync_log_url', '');
+
+        wp_send_json_success([
+            'next_page' => $has_more ? $page + 1 : false,
+            'log_url' => $log_url
         ]);
     } catch (Exception $e) {
         wp_send_json_error($e->getMessage());
