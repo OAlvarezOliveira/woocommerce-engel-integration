@@ -5,7 +5,6 @@ function engel_sync_admin_page() {
     $sync = engel_get_sync_instance();
     $message = '';
 
-    // Procesar acciones enviadas por formulario
     if (isset($_POST['action'])) {
         check_admin_referer('engel_sync_action', 'engel_sync_nonce');
 
@@ -44,14 +43,15 @@ function engel_sync_admin_page() {
         }
     }
 
-    // Obtener token para mostrar estado
     $token = $sync->get_token();
     ?>
     <div class="wrap">
         <h1>Engel WooCommerce Sync</h1>
 
         <?php if ($message): ?>
-            <div class="notice notice-success is-dismissible"><p><?php echo wp_kses_post($message); ?></p></div>
+            <div class="notice notice-success is-dismissible">
+                <p><?php echo wp_kses_post($message); ?></p>
+            </div>
         <?php endif; ?>
 
         <h2>Autenticación</h2>
@@ -82,26 +82,31 @@ function engel_sync_admin_page() {
             </form>
         <?php endif; ?>
 
-        <h2>Sincronización</h2>
+        <hr>
+
+        <h2>Sincronización de productos</h2>
         <form method="post" style="display:inline-block; margin-right:10px;">
             <?php wp_nonce_field('engel_sync_action', 'engel_sync_nonce'); ?>
             <input type="hidden" name="action" value="full_sync" />
             <button type="submit" class="button button-primary">Sincronizar todos los productos</button>
         </form>
 
-        <form method="post" style="display:inline-block; margin-right:10px;">
+        <form method="post" style="display:inline-block;">
             <?php wp_nonce_field('engel_sync_action', 'engel_sync_nonce'); ?>
             <input type="hidden" name="action" value="stock_sync" />
             <button type="submit" class="button button-secondary">Sincronizar solo stock</button>
         </form>
 
+        <hr>
+
         <h2>Exportar productos</h2>
         <form method="post">
             <?php wp_nonce_field('engel_sync_action', 'engel_sync_nonce'); ?>
             <input type="hidden" name="action" value="export_csv" />
-            <button type="submit" class="button button-secondary">Exportar CSV</button>
+            <button type="submit" class="button button-secondary">Exportar a CSV</button>
         </form>
     </div>
     <?php
 }
+
 

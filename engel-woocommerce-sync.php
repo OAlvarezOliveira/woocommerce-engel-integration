@@ -69,39 +69,53 @@ class Engel_Product_Sync {
         return $file_path;
     }
 
-    public function get_all_products($limit = 0, $language = 'es') {
+    public function get_all_products($limit = 100, $language = 'es') {
         $token = $this->get_token();
         if (!$token) {
             throw new Exception('Token de autenticación no disponible');
         }
 
-        $url = "https://b2b.novaengel.com/api/products?lang=$language";
-        if ($limit > 0) {
-            $url .= "&limit=$limit";
-        }
+        $products = [];
+        $page = 0;
 
-        $response = wp_remote_get($url, [
-            'headers' => [
-                'Authorization' => "Bearer $token",
-                'Accept' => 'application/json',
-            ],
-            'timeout' => 30,
-        ]);
+        do {
+            $url = "https://drop.novaengel.com/api/products/paging/{$token}/{$page}/{$limit}/{$language}";
+            $response = wp_remote_get($url, ['timeout' => 30]);
 
-        if (is_wp_error($response)) {
-            $this->log("Error al obtener productos: " . $response->get_error_message());
-            return [];
-        }
+            if (is_wp_error($response)) {
+                $this->log("Error al obtener productos (página {$page}): " . $response->get_error_message());
+                break;
+            }
 
-        $body = wp_remote_retrieve_body($response);
-        $data = json_decode($body, true);
+            $code = wp_remote_retrieve_response_code($response);
+            $body = wp_remote_retrieve_body($response);
 
-        if (!is_array($data)) {
-            $this->log("Respuesta inválida al obtener productos: $body");
-            return [];
-        }
+            $this->log("GET productos página {$page}, código HTTP: {$code}");
 
-        return $data;
+            if ($code !== 200) {
+                $this->log("Error de respuesta en página {$page}: $body");
+                break;
+            }
+
+            $data = json_decode($body, true);
+
+            if (!is_array($data) || empty($data)) {
+                $this->log("Página {$page} vacía o con datos inválidos");
+                break;
+            }
+
+            $products = array_merge($products, $data);
+
+            if (count($data) < $limit) {
+                // Fin de los datos
+                break;
+            }
+
+            $page++;
+
+        } while (true);
+
+        return $products;
     }
 
     private function log(string $message) {
