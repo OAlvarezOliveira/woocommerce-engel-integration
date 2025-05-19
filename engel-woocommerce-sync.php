@@ -293,3 +293,96 @@ add_action('engel_sync_batch_event', function () {
     engel_sync_start_batch();
     update_option('engel_last_sync_time', current_time('mysql'));
 });
+
+/* ---- HISTÓRICO DE SINCRONIZACIÓN EN DB ---- */
+
+// Guardar log en DB
+function engel_add_log_entry($type, $message, $count = null) {
+    global $wpdb;
+    $table = $wpdb->prefix . 'engel_sync_log';
+
+    $wpdb->insert($table, [
+        'log_time'   => current_time('mysql'),
+        'type'       => sanitize_text_field($type),
+        'message'    => sanitize_text_field($message),
+        'product_count' => is_null($count) ? null : intval($count),
+    ]);
+
+    // Limitar a las últimas 100 entradas
+    $total = $wpdb->get_var("SELECT COUNT(*) FROM $table");
+    if ($total > 100) {
+        $wpdb->query("DELETE FROM $table ORDER BY log_time ASC LIMIT " . ($total - 100));
+    }
+}
+
+// Crear tabla al activar plugin
+register_activation_hook(__FILE__, function () {
+    global $wpdb;
+    $table = $wpdb->prefix . 'engel_sync_log';
+
+    $charset_collate = $wpdb->get_charset_collate();
+
+    $sql = "CREATE TABLE IF NOT EXISTS $table (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        log_time DATETIME NOT NULL,
+        type VARCHAR(50) NOT NULL,
+        message TEXT NOT NULL,
+        product_count INT NULL
+    ) $charset_collate;";
+
+    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+    dbDelta($sql);
+});
+
+// Añadir submenú para ver histórico
+add_action('admin_menu', function () {
+    add_submenu_page(
+        'engel-sync',
+        'Historial de Sincronización',
+        'Historial',
+        'manage_options',
+        'engel-sync-log',
+        'engel_sync_log_page'
+    );
+});
+
+// Página de log
+function engel_sync_log_page() {
+    if (!current_user_can('manage_options')) {
+        wp_die('Acceso denegado.');
+    }
+
+    global $wpdb;
+    $table = $wpdb->prefix . 'engel_sync_log';
+    $logs = $wpdb->get_results("SELECT * FROM $table ORDER BY log_time DESC LIMIT 100");
+
+    echo '<div class="wrap"><h1>Historial de Sincronización</h1>';
+    if (empty($logs)) {
+        echo '<p>No hay registros todavía.</p>';
+    } else {
+        echo '<table class="widefat fixed striped"><thead><tr>
+                <th>Fecha</th>
+                <th>Tipo</th>
+                <th>Mensaje</th>
+                <th>Productos</th>
+            </tr></thead><tbody>';
+        foreach ($logs as $log) {
+            echo '<tr>';
+            echo '<td>' . esc_html($log->log_time) . '</td>';
+            echo '<td>' . esc_html($log->type) . '</td>';
+            echo '<td>' . esc_html($log->message) . '</td>';
+            echo '<td>' . ($log->product_count !== null ? intval($log->product_count) : '-') . '</td>';
+            echo '</tr>';
+        }
+        echo '</tbody></table>';
+    }
+    echo '</div>';
+}
+
+// Reemplazar log() del plugin para incluirlo en DB
+function engel_log($message, $type = 'info', $count = null) {
+    if (defined('WP_DEBUG') && WP_DEBUG) {
+        error_log('[Engel Sync] ' . $message);
+    }
+    engel_add_log_entry($type, $message, $count);
+}
