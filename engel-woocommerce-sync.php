@@ -2,7 +2,7 @@
 /*
 Plugin Name: Engel WooCommerce Sync
 Description: Sincroniza productos de Nova Engel con WooCommerce, login/logout y descarga CSV.
-Version: 1.1
+Version: 1.2
 Author: OAlvarezOliveira
 */
 
@@ -48,27 +48,24 @@ class Engel_Product_Sync {
             throw new Exception('No se pudo crear archivo CSV');
         }
 
-        // Encabezados
-        $headers = [
-            'ID', 'SKU', 'Nombre', 'Descripción corta', 'Descripción larga',
-            'Precio', 'Stock', 'Marca', 'EAN', 'Categoría', 'IVA', 'Peso (kg)'
-        ];
+        // Cabecera CSV
+        $headers = ['ID', 'SKU', 'Nombre', 'Descripción corta', 'Descripción larga', 'Precio', 'Stock', 'Marca', 'EAN', 'Categoría', 'IVA', 'Peso (kg)'];
         fputcsv($file, $headers);
 
         foreach ($products as $p) {
+            // Los datos que devolviste tienen keys con mayúsculas. Ajustamos:
             $row = [
                 $p['Id'] ?? '',
-                $p['ItemId'] ?? ($p['Id'] ?? ''),
+                $p['ItemId'] ?? '',
                 $p['Description'] ?? '',
-                mb_substr(strip_tags($p['CompleteDescription'] ?? ''), 0, 120),
                 $p['CompleteDescription'] ?? '',
                 $p['Price'] ?? '',
                 $p['Stock'] ?? '',
                 $p['BrandName'] ?? '',
-                isset($p['EANs']) ? implode(', ', $p['EANs']) : '',
-                isset($p['Families']) ? implode(', ', $p['Families']) : '',
+                isset($p['EANs'][0]) ? $p['EANs'][0] : '',
+                isset($p['Families'][0]) ? $p['Families'][0] : '',
                 $p['IVA'] ?? '',
-                $p['Kgs'] ?? ''
+                $p['Kgs'] ?? '',
             ];
             fputcsv($file, $row);
         }
@@ -79,17 +76,18 @@ class Engel_Product_Sync {
         return $file_path;
     }
 
-    public function get_all_products($limit = 0, $language = 'es') {
+    public function get_all_products($elements_per_page = 100, $language = 'es') {
         $token = $this->get_token();
         if (!$token) {
             throw new Exception('Token de autenticación no disponible');
         }
 
-        $page = 0;
         $all_products = [];
-        $elements = $limit > 0 ? $limit : 100; // elementos por página
+        $page = 0;
+
         do {
-            $url = "https://drop.novaengel.com/api/products/paging/{$token}/{$page}/{$elements}/{$language}";
+            $url = "https://drop.novaengel.com/api/products/paging/{$token}/{$page}/{$elements_per_page}/{$language}";
+
             $response = wp_remote_get($url, [
                 'headers' => [
                     'Authorization' => "Bearer $token",
@@ -99,31 +97,24 @@ class Engel_Product_Sync {
             ]);
 
             if (is_wp_error($response)) {
-                $this->log("Error al obtener productos: " . $response->get_error_message());
+                $this->log("Error al obtener productos página $page: " . $response->get_error_message());
                 break;
             }
 
             $body = wp_remote_retrieve_body($response);
             $data = json_decode($body, true);
 
-            if (!is_array($data) || empty($data)) {
+            if (!is_array($data)) {
+                $this->log("Respuesta inválida en página $page: $body");
                 break;
             }
 
+            $count = count($data);
             $all_products = array_merge($all_products, $data);
 
-            // Si la cantidad de productos obtenidos es menor que los pedidos, se acabaron
-            if (count($data) < $elements) {
-                break;
-            }
-
             $page++;
-        } while ($limit == 0 || count($all_products) < $limit);
 
-        // Si se definió un límite, recortar la lista
-        if ($limit > 0) {
-            $all_products = array_slice($all_products, 0, $limit);
-        }
+        } while ($count === $elements_per_page);
 
         return $all_products;
     }
