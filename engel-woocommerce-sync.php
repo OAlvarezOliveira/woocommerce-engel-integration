@@ -39,7 +39,11 @@ class Engel_Product_Sync {
     }
 
     public function export_products_to_csv($filename = 'engel_products.csv', $language = 'es') {
-        $products = $this->get_all_products(100, $language);
+        // Usamos configuración guardada o default
+        $elements_per_page = intval(get_option('engel_elements_per_page', 10));
+        $max_pages = intval(get_option('engel_max_pages', 5));
+
+        $products = $this->get_all_products($elements_per_page, $language, $max_pages);
         $this->log("Exportando " . count($products) . " productos a CSV");
 
         $upload_dir = wp_upload_dir();
@@ -58,6 +62,7 @@ class Engel_Product_Sync {
                 $p['Id'] ?? '',
                 $p['ItemId'] ?? '',
                 $p['Description'] ?? '',
+                '', // "Descripción corta" vacía, no viene en datos
                 $p['CompleteDescription'] ?? '',
                 $p['Price'] ?? '',
                 $p['Stock'] ?? '',
@@ -77,14 +82,15 @@ class Engel_Product_Sync {
     }
 
     /**
-     * Obtiene todos los productos paginados, paginación automática.
+     * Obtiene todos los productos paginados, paginación automática con límite.
      *
      * @param int $elements_per_page Número de elementos por página (por defecto 100).
      * @param string $language Idioma, por defecto 'es'.
+     * @param int $max_pages Número máximo de páginas para evitar timeouts (por defecto 0 sin límite).
      * @return array Array con todos los productos.
      * @throws Exception Si no hay token o error en la petición.
      */
-    public function get_all_products($elements_per_page = 100, $language = 'es') {
+    public function get_all_products($elements_per_page = 100, $language = 'es', $max_pages = 0) {
         $token = $this->get_token();
         if (!$token) {
             throw new Exception('Token de autenticación no disponible');
@@ -94,6 +100,11 @@ class Engel_Product_Sync {
         $page = 0;
 
         do {
+            if ($max_pages > 0 && $page >= $max_pages) {
+                $this->log("Límite de páginas alcanzado: $max_pages");
+                break;
+            }
+
             $url = "https://drop.novaengel.com/api/products/paging/{$token}/{$page}/{$elements_per_page}/{$language}";
 
             $this->log("Requesting page $page, $elements_per_page elementos");
