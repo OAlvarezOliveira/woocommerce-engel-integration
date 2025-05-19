@@ -77,23 +77,6 @@ class Engel_Product_Sync {
         return $file_path;
     }
 
-    add_action('wp_ajax_engel_get_export_status', function () {
-    $in_progress = get_option('engel_export_in_progress', false);
-    $page = (int) get_option('engel_export_page', 0);
-    $max_pages = (int) get_option('engel_max_pages', 100);
-    $filename = get_option('engel_export_filename', '');
-    $file_path = wp_upload_dir()['basedir'] . '/' . $filename;
-    $file_url = file_exists($file_path) ? wp_upload_dir()['baseurl'] . '/' . $filename : '';
-
-    wp_send_json([
-        'in_progress' => $in_progress,
-        'page' => $page,
-        'max_pages' => $max_pages,
-        'file_url' => $file_url,
-    ]);
-});
-
-
     public function get_all_products() {
         $token = $this->get_token();
         if (!$token) {
@@ -195,6 +178,24 @@ class Engel_Product_Sync {
     }
 }
 
+// --- Código fuera de la clase ---
+
+add_action('wp_ajax_engel_get_export_status', function () {
+    $in_progress = get_option('engel_export_in_progress', false);
+    $page = (int) get_option('engel_export_page', 0);
+    $max_pages = (int) get_option('engel_max_pages', 100);
+    $filename = get_option('engel_export_filename', '');
+    $file_path = wp_upload_dir()['basedir'] . '/' . $filename;
+    $file_url = file_exists($file_path) ? wp_upload_dir()['baseurl'] . '/' . $filename : '';
+
+    wp_send_json([
+        'in_progress' => $in_progress,
+        'page' => $page,
+        'max_pages' => $max_pages,
+        'file_url' => $file_url,
+    ]);
+});
+
 if (!function_exists('engel_log')) {
     function engel_log($message, $type = 'info', $count = null) {
         if (defined('WP_DEBUG') && WP_DEBUG) {
@@ -277,249 +278,38 @@ function engel_sync_settings_page() {
                     </td>
                 </tr>
             </table>
-            <p class="submit">
-                <button type="submit" name="submit" class="button button-primary">Guardar cambios</button>
-            </p>
-        </form>
-
-        <hr>
-
-        <h2>Sincronización Manual</h2>
-        <form method="post">
-            <?php wp_nonce_field('engel_sync_settings_nonce'); ?>
-            <p>
-                <button type="submit" name="start_manual_sync" class="button button-secondary">Iniciar sincronización ahora</button>
-            </p>
+            <?php submit_button(); ?>
         </form>
     </div>
     <?php
 }
 
-/* ---- SINCRONIZACIÓN BATCH POR WP-CRON ---- */
-
-function engel_sync_batch_process() {
-    $instance = engel_get_sync_instance();
-
-    $page = (int) get_option('engel_sync_current_page', 0);
-    $elements_per_page = (int) get_option('engel_elements_per_page', 50);
-
-    $has_more = $instance->sync_products_page($page, $elements_per_page);
-
-    if ($has_more) {
-        update_option('engel_sync_current_page', $page + 1);
-        wp_schedule_single_event(time() + 60, 'engel_sync_batch_process_hook');
-    } else {
-        delete_option('engel_sync_current_page');
-        $instance->log('Sincronización batch completada.', 'info');
-    }
-}
-add_action('engel_sync_batch_process_hook', 'engel_sync_batch_process');
-
-function engel_sync_start_batch() {
-    if (!wp_next_scheduled('engel_sync_batch_process_hook')) {
-        update_option('engel_sync_current_page', 0);
-        wp_schedule_single_event(time(), 'engel_sync_batch_process_hook');
-    }
-}
-
-// Función para programar o reprogramar evento cron
 function engel_schedule_cron_event() {
+    if (wp_next_scheduled('engel_sync_cron_event')) {
+        wp_clear_scheduled_hook('engel_sync_cron_event');
+    }
+
     $frequency = get_option('engel_sync_frequency', 'hourly');
-    if (!in_array($frequency, ['hourly', 'twicedaily', 'daily'])) {
+    if (!in_array($frequency, ['hourly', 'twicedaily', 'daily'], true)) {
         $frequency = 'hourly';
     }
 
-    // Eliminar evento programado si existe para evitar duplicados
-    $timestamp = wp_next_scheduled('engel_sync_batch_event');
-    if ($timestamp) {
-        wp_unschedule_event($timestamp, 'engel_sync_batch_event');
-    }
-
-    // Programar evento cron con la frecuencia actual
-    wp_schedule_event(time(), $frequency, 'engel_sync_batch_event');
+    wp_schedule_event(time(), $frequency, 'engel_sync_cron_event');
 }
-add_action('init', 'engel_schedule_cron_event');
 
-// Acción programada automáticamente
-add_action('engel_sync_batch_event', function () {
-    engel_sync_start_batch();
-    update_option('engel_last_sync_time', current_time('mysql'));
+add_action('engel_sync_cron_event', function () {
+    $sync = engel_get_sync_instance();
+    $sync->run_stock_sync();
 });
 
-/* ---- HISTÓRICO DE SINCRONIZACIÓN EN DB ---- */
+// Activar/desactivar cron al activar/desactivar plugin
+register_activation_hook(__FILE__, 'engel_activate_plugin');
+register_deactivation_hook(__FILE__, 'engel_deactivate_plugin');
 
-function engel_add_log_entry($type, $message, $count = null) {
-    global $wpdb;
-    $table = $wpdb->prefix . 'engel_sync_log';
-
-    $wpdb->insert($table, [
-        'log_time'   => current_time('mysql'),
-        'type'       => sanitize_text_field($type),
-        'message'    => sanitize_text_field($message),
-        'product_count' => is_null($count) ? null : intval($count),
-    ]);
-}
-
-register_activation_hook(__FILE__, function () {
-    global $wpdb;
-    $table = $wpdb->prefix . 'engel_sync_log';
-
-    $charset_collate = $wpdb->get_charset_collate();
-
-    $sql = "CREATE TABLE IF NOT EXISTS $table (
-        id BIGINT AUTO_INCREMENT PRIMARY KEY,
-        log_time DATETIME NOT NULL,
-        type VARCHAR(50) NOT NULL,
-        message TEXT NOT NULL,
-        product_count INT NULL
-    ) $charset_collate;";
-
-    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
-    dbDelta($sql);
-
-    // Programar cron al activar el plugin
+function engel_activate_plugin() {
     engel_schedule_cron_event();
-});
+}
 
-/* ---- LOGIN/LOGOUT AUTOMÁTICO (como tenías en tu código) ---- */
-
-add_action('wp_login', function ($user_login, $user) {
-    // código para login automático, si lo tienes
-}, 10, 2);
-
-add_action('wp_logout', function () {
-    // código para logout automático, si lo tienes
-});
-
-/* ---- EXPORTAR A CSV MANUALMENTE ---- */
-
-add_action('admin_post_engel_export_csv', function () {
-    if (!current_user_can('manage_options')) {
-        wp_die('No tienes permisos para realizar esta acción.');
-    }
-    $instance = engel_get_sync_instance();
-    try {
-        $file_path = $instance->export_products_to_csv();
-        $filename = basename($file_path);
-
-        header('Content-Description: File Transfer');
-        header('Content-Type: text/csv');
-        header('Content-Disposition: attachment; filename=' . $filename);
-        header('Expires: 0');
-        header('Cache-Control: must-revalidate');
-        header('Pragma: public');
-        header('Content-Length: ' . filesize($file_path));
-        readfile($file_path);
-        exit;
-    } catch (Exception $e) {
-        wp_die('Error al exportar CSV: ' . $e->getMessage());
-    } 
-});
-// INICIAR EXPORTACIÓN CSV
-add_action('wp_ajax_engel_start_export_csv', function () {
-    if (!current_user_can('manage_options')) {
-        wp_send_json_error('No autorizado');
-    }
-
-    $filename = 'engel_export_' . time() . '.csv';
-    $filepath = wp_upload_dir()['basedir'] . '/' . $filename;
-
-    // Crea el archivo CSV y escribe encabezados
-    $file = fopen($filepath, 'w');
-    if (!$file) {
-        wp_send_json_error('No se pudo crear el archivo CSV');
-    }
-
-    $headers = ['ID', 'SKU', 'Nombre', 'Descripción corta', 'Descripción larga', 'Precio', 'Stock', 'Marca', 'EAN', 'Categoría', 'IVA', 'Peso (kg)'];
-    fputcsv($file, $headers);
-    fclose($file);
-
-    // Guardar opciones de progreso
-    update_option('engel_export_in_progress', true);
-    update_option('engel_export_page', 0);
-    update_option('engel_export_filename', $filename);
-
-    wp_send_json_success(['message' => 'Exportación iniciada']);
-});
-
-// PROCESAR SIGUIENTE PÁGINA DE EXPORTACIÓN
-add_action('wp_ajax_engel_export_csv_next_page', function () {
-    if (!current_user_can('manage_options')) {
-        wp_send_json_error('No autorizado');
-    }
-
-    $page = (int) get_option('engel_export_page', 0);
-    $elements_per_page = (int) get_option('engel_elements_per_page', 10);
-    $filename = get_option('engel_export_filename', '');
-    $filepath = wp_upload_dir()['basedir'] . '/' . $filename;
-
-    if (!$filename || !file_exists($filepath)) {
-        wp_send_json_error('Archivo CSV no encontrado');
-    }
-
-    // Obtener instancia
-    $instance = engel_get_sync_instance();
-    if (!$instance) {
-        wp_send_json_error('Instancia no disponible');
-    }
-
-    $token = $instance->get_token();
-    if (!$token) {
-        wp_send_json_error('Token inválido');
-    }
-
-    // Obtener datos de API
-    $url = "https://drop.novaengel.com/api/products/paging/{$token}/{$page}/{$elements_per_page}/es";
-    $response = wp_remote_get($url, [
-        'headers' => [
-            'Authorization' => "Bearer $token",
-            'Accept' => 'application/json',
-        ],
-        'timeout' => 30,
-    ]);
-
-    if (is_wp_error($response)) {
-        wp_send_json_error('Error al obtener datos: ' . $response->get_error_message());
-    }
-
-    $data = json_decode(wp_remote_retrieve_body($response), true);
-    if (!is_array($data) || empty($data)) {
-        // Finaliza exportación
-        update_option('engel_export_in_progress', false);
-        delete_option('engel_export_page');
-        wp_send_json_success(['done' => true]);
-    }
-
-    // Agregar datos al archivo CSV
-    $file = fopen($filepath, 'a');
-    if (!$file) {
-        wp_send_json_error('No se pudo abrir el archivo CSV para escribir');
-    }
-
-    foreach ($data as $p) {
-        $row = [
-            $p['Id'] ?? '',
-            $p['ItemId'] ?? '',
-            $p['Description'] ?? '',
-            $p['CompleteDescription'] ?? '',
-            $p['Price'] ?? '',
-            $p['Stock'] ?? '',
-            $p['BrandName'] ?? '',
-            isset($p['EANs'][0]) ? $p['EANs'][0] : '',
-            isset($p['Families'][0]) ? $p['Families'][0] : '',
-            $p['IVA'] ?? '',
-            $p['Kgs'] ?? '',
-        ];
-        fputcsv($file, $row);
-    }
-    fclose($file);
-
-    // Incrementar página y continuar
-    update_option('engel_export_page', $page + 1);
-
-    wp_send_json_success([
-        'page' => $page + 1,
-        'count' => count($data),
-        'filename' => $filename,
-    ]);
-});
+function engel_deactivate_plugin() {
+    wp_clear_scheduled_hook('engel_sync_cron_event');
+}
