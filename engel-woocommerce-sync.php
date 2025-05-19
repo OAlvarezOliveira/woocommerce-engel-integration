@@ -229,6 +229,12 @@ function engel_sync_settings_page() {
         echo '<div class="notice notice-success is-dismissible"><p>Configuración guardada correctamente.</p></div>';
     }
 
+    if (isset($_POST['start_manual_sync'])) {
+        check_admin_referer('engel_sync_settings_nonce');
+        engel_sync_start_batch();
+        echo '<div class="notice notice-info is-dismissible"><p>Sincronización iniciada manualmente.</p></div>';
+    }
+
     $elements_per_page = get_option('engel_elements_per_page', 10);
     $max_pages = get_option('engel_max_pages', 5);
     ?>
@@ -248,6 +254,16 @@ function engel_sync_settings_page() {
             </table>
             <p class="submit">
                 <button type="submit" name="submit" class="button button-primary">Guardar cambios</button>
+            </p>
+        </form>
+
+        <hr>
+
+        <h2>Sincronización Manual</h2>
+        <form method="post">
+            <?php wp_nonce_field('engel_sync_settings_nonce'); ?>
+            <p>
+                <button type="submit" name="start_manual_sync" class="button button-secondary">Iniciar sincronización ahora</button>
             </p>
         </form>
     </div>
