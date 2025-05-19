@@ -57,7 +57,6 @@ add_action('admin_init', function () {
     }, 'engel_sync_settings', 'engel_sync_section');
 });
 
-// Clase principal
 class Engel_Product_Sync {
     use Engel_Connection_Trait;
     use Engel_WC_Sync_Trait;
@@ -223,14 +222,12 @@ class Engel_Product_Sync {
     }
 }
 
-// Función global para logs centralizados
 function engel_log($message) {
     if (defined('WP_DEBUG') && WP_DEBUG) {
         error_log('[Engel Sync] ' . $message);
     }
 }
 
-// Instancia única
 function engel_get_sync_instance() {
     static $instance = null;
     if ($instance === null) {
@@ -239,31 +236,37 @@ function engel_get_sync_instance() {
     return $instance;
 }
 
-// Menú admin principal
 add_action('admin_menu', function () {
     add_menu_page('Engel Sync', 'Engel Sync', 'manage_options', 'engel-sync', 'engel_sync_admin_page');
 });
 
-
-// ========== NUEVO: Handler AJAX para sincronización de stock por página ==========
-
-add_action('wp_ajax_engel_process_stock_sync_page', function () {
+add_action('wp_ajax_engel_stock_sync_async', function () {
     check_ajax_referer('engel_stock_sync_nonce');
 
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error('Permisos insuficientes');
+    }
+
     $page = isset($_POST['page']) ? intval($_POST['page']) : 0;
-
-    $sync = engel_get_sync_instance();
-
     $elements_per_page = intval(get_option('engel_elements_per_page', 100));
     $max_pages = intval(get_option('engel_max_pages', 200));
 
     try {
+        $sync = engel_get_sync_instance();
         $has_more = $sync->run_stock_sync_page($page, $elements_per_page);
 
+        $progress = min(100, (($page + 1) / $max_pages) * 100);
+        $finished = !$has_more;
+
         wp_send_json_success([
-            'next_page' => $has_more ? $page + 1 : false
+            'message' => "Página $page procesada correctamente.",
+            'progress' => $progress,
+            'finished' => $finished,
+            'next_page' => $has_more ? $page + 1 : false,
         ]);
     } catch (Exception $e) {
-        wp_send_json_error($e->getMessage());
+        wp_send_json_error([
+            'message' => 'Error en sincronización de stock: ' . $e->getMessage(),
+        ]);
     }
 });
