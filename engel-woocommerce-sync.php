@@ -40,6 +40,8 @@ class Engel_Product_Sync {
 
     public function export_products_to_csv($filename = 'engel_products.csv', $language = 'es') {
         $products = $this->get_all_products(100, $language);
+        $this->log("Exportando " . count($products) . " productos a CSV");
+
         $upload_dir = wp_upload_dir();
         $file_path = $upload_dir['basedir'] . '/' . $filename;
 
@@ -48,12 +50,10 @@ class Engel_Product_Sync {
             throw new Exception('No se pudo crear archivo CSV');
         }
 
-        // Cabecera CSV
         $headers = ['ID', 'SKU', 'Nombre', 'Descripción corta', 'Descripción larga', 'Precio', 'Stock', 'Marca', 'EAN', 'Categoría', 'IVA', 'Peso (kg)'];
         fputcsv($file, $headers);
 
         foreach ($products as $p) {
-            // Los datos que devolviste tienen keys con mayúsculas. Ajustamos:
             $row = [
                 $p['Id'] ?? '',
                 $p['ItemId'] ?? '',
@@ -76,55 +76,71 @@ class Engel_Product_Sync {
         return $file_path;
     }
 
+    /**
+     * Obtiene todos los productos paginados, paginación automática.
+     *
+     * @param int $elements_per_page Número de elementos por página (por defecto 100).
+     * @param string $language Idioma, por defecto 'es'.
+     * @return array Array con todos los productos.
+     * @throws Exception Si no hay token o error en la petición.
+     */
     public function get_all_products($elements_per_page = 100, $language = 'es') {
-    $token = $this->get_token();
-    if (!$token) {
-        throw new Exception('Token de autenticación no disponible');
+        $token = $this->get_token();
+        if (!$token) {
+            throw new Exception('Token de autenticación no disponible');
+        }
+
+        $all_products = [];
+        $page = 0;
+
+        do {
+            $url = "https://drop.novaengel.com/api/products/paging/{$token}/{$page}/{$elements_per_page}/{$language}";
+
+            $this->log("Requesting page $page, $elements_per_page elementos");
+
+            $response = wp_remote_get($url, [
+                'headers' => [
+                    'Authorization' => "Bearer $token",
+                    'Accept' => 'application/json',
+                ],
+                'timeout' => 30,
+            ]);
+
+            if (is_wp_error($response)) {
+                $this->log("Error al obtener productos página $page: " . $response->get_error_message());
+                break;
+            }
+
+            $body = wp_remote_retrieve_body($response);
+            $data = json_decode($body, true);
+
+            if (!is_array($data)) {
+                $this->log("Respuesta inválida en página $page: $body");
+                break;
+            }
+
+            $count = count($data);
+            $this->log("Página $page: recibidos $count productos");
+
+            $all_products = array_merge($all_products, $data);
+
+            $page++;
+
+        } while ($count === $elements_per_page);
+
+        $this->log("Total productos obtenidos: " . count($all_products));
+
+        return $all_products;
     }
 
-    $all_products = [];
-    $page = 0;
-
-    do {
-        $url = "https://drop.novaengel.com/api/products/paging/{$token}/{$page}/{$elements_per_page}/{$language}";
-
-        $this->log("Requesting page $page, $elements_per_page elements");
-
-        $response = wp_remote_get($url, [
-            'headers' => [
-                'Authorization' => "Bearer $token",
-                'Accept' => 'application/json',
-            ],
-            'timeout' => 30,
-        ]);
-
-        if (is_wp_error($response)) {
-            $this->log("Error al obtener productos página $page: " . $response->get_error_message());
-            break;
+    private function log(string $message) {
+        if (function_exists('engel_log')) {
+            engel_log($message);
+        } else {
+            error_log('[Engel Sync] ' . $message);
         }
-
-        $body = wp_remote_retrieve_body($response);
-        $data = json_decode($body, true);
-
-        if (!is_array($data)) {
-            $this->log("Respuesta inválida en página $page: $body");
-            break;
-        }
-
-        $count = count($data);
-        $this->log("Página $page: recibidos $count productos");
-
-        $all_products = array_merge($all_products, $data);
-
-        $page++;
-
-    } while ($count === $elements_per_page);
-
-    $this->log("Total productos obtenidos: " . count($all_products));
-
-    return $all_products;
+    }
 }
-
 
 // Función global para logs centralizados
 function engel_log($message) {
