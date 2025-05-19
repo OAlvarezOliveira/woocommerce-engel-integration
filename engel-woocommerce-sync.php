@@ -168,7 +168,6 @@ class Engel_Product_Sync {
         return count($data) === $elements_per_page;
     }
 
-    // 1. Cambiar visibilidad de log() a pública para que pueda usarse fuera
     public function log(string $message, string $type = 'info', ?int $count = null) {
         if (function_exists('engel_log')) {
             engel_log($message, $type, $count);
@@ -178,14 +177,12 @@ class Engel_Product_Sync {
     }
 }
 
-// 2. Declarar engel_log() solo si no existe para evitar errores fatales
 if (!function_exists('engel_log')) {
     function engel_log($message, $type = 'info', $count = null) {
         if (defined('WP_DEBUG') && WP_DEBUG) {
             error_log("[Engel Sync][$type] " . $message);
         }
-        // Guardar en base de datos (si tienes función para eso, llamar aquí)
-        // engel_add_log_entry($type, $message, $count); 
+        engel_add_log_entry($type, $message, $count);
     }
 }
 
@@ -222,21 +219,21 @@ function engel_sync_settings_page() {
 
         $elements_per_page = max(1, intval($_POST['engel_elements_per_page']));
         $max_pages = max(1, intval($_POST['engel_max_pages']));
+        $frequency = $_POST['engel_sync_frequency'] ?? 'hourly';
 
         update_option('engel_elements_per_page', $elements_per_page);
         update_option('engel_max_pages', $max_pages);
+        update_option('engel_sync_frequency', $frequency);
+
+        // Reprogramar cron con la nueva frecuencia
+        engel_schedule_cron_event();
 
         echo '<div class="notice notice-success is-dismissible"><p>Configuración guardada correctamente.</p></div>';
     }
 
-    if (isset($_POST['start_manual_sync'])) {
-        check_admin_referer('engel_sync_settings_nonce');
-        engel_sync_start_batch();
-        echo '<div class="notice notice-info is-dismissible"><p>Sincronización iniciada manualmente.</p></div>';
-    }
-
     $elements_per_page = get_option('engel_elements_per_page', 10);
     $max_pages = get_option('engel_max_pages', 5);
+    $frequency = get_option('engel_sync_frequency', 'hourly');
     ?>
     <div class="wrap">
         <h1>Configuración de Paginación - Engel Sync</h1>
@@ -250,6 +247,16 @@ function engel_sync_settings_page() {
                 <tr>
                     <th scope="row"><label for="engel_max_pages">Número máximo de páginas</label></th>
                     <td><input name="engel_max_pages" type="number" id="engel_max_pages" value="<?php echo esc_attr($max_pages); ?>" min="1" max="100" required></td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="engel_sync_frequency">Frecuencia de sincronización automática</label></th>
+                    <td>
+                        <select name="engel_sync_frequency" id="engel_sync_frequency">
+                            <option value="hourly" <?php selected($frequency, 'hourly'); ?>>Cada hora</option>
+                            <option value="twicedaily" <?php selected($frequency, 'twicedaily'); ?>>Dos veces al día</option>
+                            <option value="daily" <?php selected($frequency, 'daily'); ?>>Una vez al día</option>
+                        </select>
+                    </td>
                 </tr>
             </table>
             <p class="submit">
@@ -297,20 +304,25 @@ function engel_sync_start_batch() {
     }
 }
 
-// 🔄 Nueva tarea automática programada
-function engel_register_sync_cron() {
+// Función para programar o reprogramar evento cron
+function engel_schedule_cron_event() {
     $frequency = get_option('engel_sync_frequency', 'hourly');
     if (!in_array($frequency, ['hourly', 'twicedaily', 'daily'])) {
         $frequency = 'hourly';
     }
 
-    if (!wp_next_scheduled('engel_sync_batch_event')) {
-        wp_schedule_event(time(), $frequency, 'engel_sync_batch_event');
+    // Eliminar evento programado si existe para evitar duplicados
+    $timestamp = wp_next_scheduled('engel_sync_batch_event');
+    if ($timestamp) {
+        wp_unschedule_event($timestamp, 'engel_sync_batch_event');
     }
-}
-add_action('init', 'engel_register_sync_cron');
 
-// 🔁 Acción programada automáticamente
+    // Programar evento cron con la frecuencia actual
+    wp_schedule_event(time(), $frequency, 'engel_sync_batch_event');
+}
+add_action('init', 'engel_schedule_cron_event');
+
+// Acción programada automáticamente
 add_action('engel_sync_batch_event', function () {
     engel_sync_start_batch();
     update_option('engel_last_sync_time', current_time('mysql'));
@@ -318,7 +330,6 @@ add_action('engel_sync_batch_event', function () {
 
 /* ---- HISTÓRICO DE SINCRONIZACIÓN EN DB ---- */
 
-// Guardar log en DB
 function engel_add_log_entry($type, $message, $count = null) {
     global $wpdb;
     $table = $wpdb->prefix . 'engel_sync_log';
@@ -329,15 +340,8 @@ function engel_add_log_entry($type, $message, $count = null) {
         'message'    => sanitize_text_field($message),
         'product_count' => is_null($count) ? null : intval($count),
     ]);
-
-    // Limitar a las últimas 100 entradas
-    $total = $wpdb->get_var("SELECT COUNT(*) FROM $table");
-    if ($total > 100) {
-        $wpdb->query("DELETE FROM $table ORDER BY log_time ASC LIMIT " . ($total - 100));
-    }
 }
 
-// Crear tabla al activar plugin
 register_activation_hook(__FILE__, function () {
     global $wpdb;
     $table = $wpdb->prefix . 'engel_sync_log';
@@ -354,57 +358,42 @@ register_activation_hook(__FILE__, function () {
 
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
     dbDelta($sql);
+
+    // Programar cron al activar el plugin
+    engel_schedule_cron_event();
 });
 
-// Añadir submenú para ver histórico
-add_action('admin_menu', function () {
-    add_submenu_page(
-        'engel-sync',
-        'Historial de Sincronización',
-        'Historial',
-        'manage_options',
-        'engel-sync-log',
-        'engel_sync_log_page'
-    );
+/* ---- LOGIN/LOGOUT AUTOMÁTICO (como tenías en tu código) ---- */
+
+add_action('wp_login', function ($user_login, $user) {
+    // código para login automático, si lo tienes
+}, 10, 2);
+
+add_action('wp_logout', function () {
+    // código para logout automático, si lo tienes
 });
 
-// Página de log
-function engel_sync_log_page() {
+/* ---- EXPORTAR A CSV MANUALMENTE ---- */
+
+add_action('admin_post_engel_export_csv', function () {
     if (!current_user_can('manage_options')) {
-        wp_die('Acceso denegado.');
+        wp_die('No tienes permisos para realizar esta acción.');
     }
+    $instance = engel_get_sync_instance();
+    try {
+        $file_path = $instance->export_products_to_csv();
+        $filename = basename($file_path);
 
-    global $wpdb;
-    $table = $wpdb->prefix . 'engel_sync_log';
-    $logs = $wpdb->get_results("SELECT * FROM $table ORDER BY log_time DESC LIMIT 100");
-
-    echo '<div class="wrap"><h1>Historial de Sincronización</h1>';
-    if (empty($logs)) {
-        echo '<p>No hay registros todavía.</p>';
-    } else {
-        echo '<table class="widefat fixed striped"><thead><tr>
-                <th>Fecha</th>
-                <th>Tipo</th>
-                <th>Mensaje</th>
-                <th>Productos</th>
-            </tr></thead><tbody>';
-        foreach ($logs as $log) {
-            echo '<tr>';
-            echo '<td>' . esc_html($log->log_time) . '</td>';
-            echo '<td>' . esc_html($log->type) . '</td>';
-            echo '<td>' . esc_html($log->message) . '</td>';
-            echo '<td>' . ($log->product_count !== null ? intval($log->product_count) : '-') . '</td>';
-            echo '</tr>';
-        }
-        echo '</tbody></table>';
+        header('Content-Description: File Transfer');
+        header('Content-Type: text/csv');
+        header('Content-Disposition: attachment; filename=' . $filename);
+        header('Expires: 0');
+        header('Cache-Control: must-revalidate');
+        header('Pragma: public');
+        header('Content-Length: ' . filesize($file_path));
+        readfile($file_path);
+        exit;
+    } catch (Exception $e) {
+        wp_die('Error al exportar CSV: ' . $e->getMessage());
     }
-    echo '</div>';
-}
-
-// Reemplazar log() del plugin para incluirlo en DB
-function engel_log($message, $type = 'info', $count = null) {
-    if (defined('WP_DEBUG') && WP_DEBUG) {
-        error_log('[Engel Sync] ' . $message);
-    }
-    engel_add_log_entry($type, $message, $count);
-}
+});
