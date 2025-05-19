@@ -3,7 +3,7 @@
 
 trait Engel_Connection_Trait {
 
-    private $login_url = 'https://b2b.novaengel.com/api/login';
+    private $login_url = 'https://drop.novaengel.com/api/login';
     private $token = null;
 
     /**
