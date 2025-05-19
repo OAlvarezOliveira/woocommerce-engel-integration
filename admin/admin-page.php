@@ -52,6 +52,11 @@ function engel_sync_admin_page() {
 
                     $message = "Configuración de paginación guardada.";
                     break;
+
+                case 'batch_sync':
+                    engel_sync_start_batch();
+                    $message = "Sincronización batch iniciada. Se procesará en segundo plano.";
+                    break;
             }
         } catch (Exception $e) {
             $message = 'Error: ' . $e->getMessage();
@@ -106,10 +111,17 @@ function engel_sync_admin_page() {
             <button type="submit" class="button button-primary">Sincronizar todos los productos</button>
         </form>
 
-        <form method="post" style="display:inline-block;">
+        <form method="post" style="display:inline-block; margin-right:10px;">
             <?php wp_nonce_field('engel_sync_action', 'engel_sync_nonce'); ?>
             <input type="hidden" name="action" value="stock_sync" />
             <button type="submit" class="button button-secondary">Sincronizar solo stock</button>
+        </form>
+
+        <!-- NUEVO botón para sincronización batch -->
+        <form method="post" style="display:inline-block;">
+            <?php wp_nonce_field('engel_sync_action', 'engel_sync_nonce'); ?>
+            <input type="hidden" name="action" value="batch_sync" />
+            <button type="submit" class="button button-secondary">Sincronizar productos (Batch WP-Cron)</button>
         </form>
 
         <hr>
