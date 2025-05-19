@@ -117,15 +117,6 @@ class Engel_Product_Sync {
         return $file_path;
     }
 
-    /**
-     * Obtiene todos los productos paginados, con límite de páginas.
-     *
-     * @param int $elements_per_page Número de productos por página.
-     * @param string $language Código de idioma.
-     * @param int $max_pages Límite máximo de páginas a solicitar.
-     * @return array Todos los productos obtenidos.
-     * @throws Exception Si no hay token válido.
-     */
     public function get_all_products($elements_per_page = 100, $language = 'es', $max_pages = 200) {
         $token = $this->get_token();
         if (!$token) {
@@ -174,6 +165,55 @@ class Engel_Product_Sync {
         return $all_products;
     }
 
+    public function run_stock_sync_page(int $page, int $elements_per_page = 100): bool {
+        $token = $this->get_token();
+        if (!$token) {
+            throw new Exception('Token de autenticación no disponible');
+        }
+
+        $language = 'es';
+        $max_pages = intval(get_option('engel_max_pages', 200));
+
+        $url = "https://drop.novaengel.com/api/products/paging/{$token}/{$page}/{$elements_per_page}/{$language}";
+
+        $this->log("Sincronizando stock página $page ($elements_per_page productos)");
+
+        $response = wp_remote_get($url, [
+            'headers' => [
+                'Authorization' => "Bearer $token",
+                'Accept' => 'application/json',
+            ],
+            'timeout' => 60,
+        ]);
+
+        if (is_wp_error($response)) {
+            $this->log("Error al obtener productos página $page: " . $response->get_error_message());
+            throw new Exception("Error al obtener productos: " . $response->get_error_message());
+        }
+
+        $body = wp_remote_retrieve_body($response);
+        $products = json_decode($body, true);
+
+        if (!is_array($products)) {
+            $this->log("Respuesta inválida en página $page: $body");
+            throw new Exception("Respuesta inválida de API");
+        }
+
+        $count = count($products);
+
+        if ($count === 0) {
+            return false;
+        }
+
+        $this->sync_stock_only_to_wc($products);
+
+        $has_more = ($count === $elements_per_page) && ($page + 1 < $max_pages);
+
+        $this->log("Sincronización stock página $page finalizada. Hay más páginas: " . ($has_more ? 'sí' : 'no'));
+
+        return $has_more;
+    }
+
     private function log(string $message) {
         if (function_exists('engel_log')) {
             engel_log($message);
@@ -202,4 +242,28 @@ function engel_get_sync_instance() {
 // Menú admin principal
 add_action('admin_menu', function () {
     add_menu_page('Engel Sync', 'Engel Sync', 'manage_options', 'engel-sync', 'engel_sync_admin_page');
+});
+
+
+// ========== NUEVO: Handler AJAX para sincronización de stock por página ==========
+
+add_action('wp_ajax_engel_process_stock_sync_page', function () {
+    check_ajax_referer('engel_stock_sync_nonce');
+
+    $page = isset($_POST['page']) ? intval($_POST['page']) : 0;
+
+    $sync = engel_get_sync_instance();
+
+    $elements_per_page = intval(get_option('engel_elements_per_page', 100));
+    $max_pages = intval(get_option('engel_max_pages', 200));
+
+    try {
+        $has_more = $sync->run_stock_sync_page($page, $elements_per_page);
+
+        wp_send_json_success([
+            'next_page' => $has_more ? $page + 1 : false
+        ]);
+    } catch (Exception $e) {
+        wp_send_json_error($e->getMessage());
+    }
 });
