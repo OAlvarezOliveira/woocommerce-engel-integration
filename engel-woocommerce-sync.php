@@ -1,8 +1,8 @@
 <?php
 /*
-Plugin Name: Engel WooCommerce Sync Version: 1.4
+Plugin Name: Engel WooCommerce Sync Version: 1.5
 Description: Sincroniza productos de Nova Engel con WooCommerce, login/logout y descarga CSV.
-Version: 1.4
+Version: 1.5
 Author: OAlvarezOliveira
 */
 
@@ -29,18 +29,18 @@ class Engel_Product_Sync {
     public function run_full_sync() {
         $products = $this->get_all_products();
         $this->sync_all_products_to_wc($products);
-        $this->log('Sincronización completa finalizada.');
+        $this->log('Sincronización completa finalizada.', 'info', count($products));
     }
 
     public function run_stock_sync() {
         $products = $this->get_all_products();
         $this->sync_stock_only_to_wc($products);
-        $this->log('Sincronización de stock finalizada.');
+        $this->log('Sincronización de stock finalizada.', 'info', count($products));
     }
 
     public function export_products_to_csv($filename = 'engel_products.csv', $language = 'es') {
         $products = $this->get_all_products();
-        $this->log("Exportando " . count($products) . " productos a CSV");
+        $this->log("Exportando " . count($products) . " productos a CSV", 'info', count($products));
 
         $upload_dir = wp_upload_dir();
         $file_path = $upload_dir['basedir'] . '/' . $filename;
@@ -71,7 +71,7 @@ class Engel_Product_Sync {
         }
 
         fclose($file);
-        $this->log("CSV exportado: $file_path");
+        $this->log("CSV exportado: $file_path", 'info');
 
         return $file_path;
     }
@@ -90,13 +90,13 @@ class Engel_Product_Sync {
 
         do {
             if ($page >= $max_pages) {
-                $this->log("Límite máximo de páginas ($max_pages) alcanzado.");
+                $this->log("Límite máximo de páginas ($max_pages) alcanzado.", 'info');
                 break;
             }
 
             $url = "https://drop.novaengel.com/api/products/paging/{$token}/{$page}/{$elements_per_page}/es";
 
-            $this->log("Solicitando página $page con $elements_per_page productos por página.");
+            $this->log("Solicitando página $page con $elements_per_page productos por página.", 'info');
 
             $response = wp_remote_get($url, [
                 'headers' => [
@@ -107,7 +107,7 @@ class Engel_Product_Sync {
             ]);
 
             if (is_wp_error($response)) {
-                $this->log("Error al obtener productos página $page: " . $response->get_error_message());
+                $this->log("Error al obtener productos página $page: " . $response->get_error_message(), 'error');
                 break;
             }
 
@@ -115,31 +115,31 @@ class Engel_Product_Sync {
             $data = json_decode($body, true);
 
             if (!is_array($data)) {
-                $this->log("Respuesta inválida en página $page: $body");
+                $this->log("Respuesta inválida en página $page: $body", 'error');
                 break;
             }
 
             $count = count($data);
-            $this->log("Página $page: recibidos $count productos");
+            $this->log("Página $page: recibidos $count productos", 'info');
 
             $all_products = array_merge($all_products, $data);
             $page++;
 
         } while ($count === $elements_per_page);
 
-        $this->log("Total productos obtenidos: " . count($all_products));
+        $this->log("Total productos obtenidos: " . count($all_products), 'info');
         return $all_products;
     }
 
     public function sync_products_page(int $page = 0, int $elements_per_page = 50) {
         $token = $this->get_token();
         if (!$token) {
-            $this->log('Token no disponible para sincronización por página.');
+            $this->log('Token no disponible para sincronización por página.', 'error');
             return false;
         }
 
         $url = "https://drop.novaengel.com/api/products/paging/{$token}/{$page}/{$elements_per_page}/es";
-        $this->log("Sincronizando página $page con $elements_per_page productos por página.");
+        $this->log("Sincronizando página $page con $elements_per_page productos por página.", 'info');
 
         $response = wp_remote_get($url, [
             'headers' => [
@@ -150,7 +150,7 @@ class Engel_Product_Sync {
         ]);
 
         if (is_wp_error($response)) {
-            $this->log('Error en request: ' . $response->get_error_message());
+            $this->log('Error en request: ' . $response->get_error_message(), 'error');
             return false;
         }
 
@@ -158,28 +158,34 @@ class Engel_Product_Sync {
         $data = json_decode($body, true);
 
         if (!is_array($data) || empty($data)) {
-            $this->log("No hay más productos o respuesta inválida en página $page.");
+            $this->log("No hay más productos o respuesta inválida en página $page.", 'info');
             return false;
         }
 
         $this->sync_all_products_to_wc($data);
-        $this->log("Página $page sincronizada correctamente.");
+        $this->log("Página $page sincronizada correctamente.", 'info');
 
         return count($data) === $elements_per_page;
     }
 
-    private function log(string $message) {
+    // 1. Cambiar visibilidad de log() a pública para que pueda usarse fuera
+    public function log(string $message, string $type = 'info', ?int $count = null) {
         if (function_exists('engel_log')) {
-            engel_log($message);
+            engel_log($message, $type, $count);
         } else {
             error_log('[Engel Sync] ' . $message);
         }
     }
 }
 
-function engel_log($message) {
-    if (defined('WP_DEBUG') && WP_DEBUG) {
-        error_log('[Engel Sync] ' . $message);
+// 2. Declarar engel_log() solo si no existe para evitar errores fatales
+if (!function_exists('engel_log')) {
+    function engel_log($message, $type = 'info', $count = null) {
+        if (defined('WP_DEBUG') && WP_DEBUG) {
+            error_log("[Engel Sync][$type] " . $message);
+        }
+        // Guardar en base de datos (si tienes función para eso, llamar aquí)
+        // engel_add_log_entry($type, $message, $count); 
     }
 }
 
@@ -263,7 +269,7 @@ function engel_sync_batch_process() {
         wp_schedule_single_event(time() + 60, 'engel_sync_batch_process_hook');
     } else {
         delete_option('engel_sync_current_page');
-        $instance->log('Sincronización batch completada.');
+        $instance->log('Sincronización batch completada.', 'info');
     }
 }
 add_action('engel_sync_batch_process_hook', 'engel_sync_batch_process');
