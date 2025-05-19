@@ -24,12 +24,12 @@ function engel_sync_admin_page() {
 
                 case 'full_sync':
                     $sync->run_full_sync();
-                    $message = "Sincronización completa realizada.";
+                    $message = "Sincronización completa iniciada. Se procesará en segundo plano.";
                     break;
 
                 case 'stock_sync':
                     $sync->run_stock_sync();
-                    $message = "Sincronización de stock realizada.";
+                    $message = "Sincronización de stock iniciada.";
                     break;
 
                 case 'export_csv':
@@ -41,7 +41,7 @@ function engel_sync_admin_page() {
                 case 'save_pagination_settings':
                     $elements_per_page = intval($_POST['elements_per_page'] ?? 10);
                     $max_pages = intval($_POST['max_pages'] ?? 5);
-                    $frequency = sanitize_text_field($_POST['sync_frequency'] ?? 'hourly');
+                    $frequency = sanitize_text_field($_POST['sync_frequency'] ?? 'daily');
 
                     if ($elements_per_page < 1) $elements_per_page = 10;
                     if ($elements_per_page > 100) $elements_per_page = 100;
@@ -52,9 +52,7 @@ function engel_sync_admin_page() {
                     update_option('engel_max_pages', $max_pages);
                     update_option('engel_sync_frequency', $frequency);
 
-                    // Reprogramar cron
-                    wp_clear_scheduled_hook('engel_sync_batch_event');
-                    wp_schedule_event(time(), $frequency, 'engel_sync_batch_event');
+                    engel_schedule_cron_event($frequency);
 
                     $message = "Configuración guardada correctamente.";
                     break;
@@ -65,6 +63,16 @@ function engel_sync_admin_page() {
     }
 
     $token = $sync->get_token();
+    $elements_per_page = get_option('engel_elements_per_page', 10);
+    $max_pages = get_option('engel_max_pages', 5);
+    $frequency = get_option('engel_sync_frequency', 'daily');
+    $last_sync = get_option('engel_last_sync_time', '—');
+    $logs = get_option('engel_sync_logs', []);
+    $frequencies = [
+        'hourly' => 'Cada hora',
+        'twicedaily' => 'Cada 12 horas',
+        'daily' => 'Cada 24 horas'
+    ];
     ?>
     <div class="wrap">
         <h1>Engel WooCommerce Sync</h1>
@@ -87,17 +95,15 @@ function engel_sync_admin_page() {
             <form method="post">
                 <?php wp_nonce_field('engel_sync_action', 'engel_sync_nonce'); ?>
                 <input type="hidden" name="action" value="login" />
-                <table class="form-table" role="presentation">
-                    <tbody>
-                        <tr>
-                            <th><label for="user">Usuario Engel</label></th>
-                            <td><input name="user" type="text" id="user" class="regular-text" required></td>
-                        </tr>
-                        <tr>
-                            <th><label for="password">Contraseña Engel</label></th>
-                            <td><input name="password" type="password" id="password" class="regular-text" required></td>
-                        </tr>
-                    </tbody>
+                <table class="form-table">
+                    <tr>
+                        <th><label for="user">Usuario Engel</label></th>
+                        <td><input name="user" type="text" id="user" class="regular-text" required></td>
+                    </tr>
+                    <tr>
+                        <th><label for="password">Contraseña Engel</label></th>
+                        <td><input name="password" type="password" id="password" class="regular-text" required></td>
+                    </tr>
                 </table>
                 <button type="submit" class="button button-primary">Login</button>
             </form>
@@ -105,7 +111,7 @@ function engel_sync_admin_page() {
 
         <hr>
 
-        <h2>Sincronización de productos</h2>
+        <h2>Sincronización manual</h2>
         <form method="post" style="display:inline-block; margin-right:10px;">
             <?php wp_nonce_field('engel_sync_action', 'engel_sync_nonce'); ?>
             <input type="hidden" name="action" value="full_sync" />
@@ -129,62 +135,66 @@ function engel_sync_admin_page() {
 
         <hr>
 
-        <h2>Configuración de paginación y cron</h2>
+        <h2>Configuración</h2>
         <form method="post">
             <?php wp_nonce_field('engel_sync_action', 'engel_sync_nonce'); ?>
             <input type="hidden" name="action" value="save_pagination_settings" />
-            <table class="form-table" role="presentation">
-                <tbody>
-                    <tr>
-                        <th><label for="elements_per_page">Productos por página</label></th>
-                        <td><input name="elements_per_page" type="number" id="elements_per_page" value="<?php echo esc_attr(get_option('engel_elements_per_page', 10)); ?>" min="1" max="100" required></td>
-                    </tr>
-                    <tr>
-                        <th><label for="max_pages">Número máximo de páginas</label></th>
-                        <td><input name="max_pages" type="number" id="max_pages" value="<?php echo esc_attr(get_option('engel_max_pages', 5)); ?>" min="1" max="100" required></td>
-                    </tr>
-                    <tr>
-                        <th><label for="sync_frequency">Frecuencia de sincronización automática</label></th>
-                        <td>
-                            <select name="sync_frequency" id="sync_frequency">
-                                <?php
-                                $current = get_option('engel_sync_frequency', 'hourly');
-                                $options = [
-                                    'hourly' => 'Cada 1 hora',
-                                    'twicedaily' => 'Cada 12 horas',
-                                    'daily' => 'Cada 24 horas',
-                                ];
-                                foreach ($options as $value => $label) {
-                                    echo '<option value="' . esc_attr($value) . '" ' . selected($current, $value, false) . '>' . esc_html($label) . '</option>';
-                                }
-                                ?>
-                            </select>
-                        </td>
-                    </tr>
-                </tbody>
+            <table class="form-table">
+                <tr>
+                    <th><label for="elements_per_page">Productos por página</label></th>
+                    <td><input name="elements_per_page" type="number" id="elements_per_page" value="<?php echo esc_attr($elements_per_page); ?>" min="1" max="100" required></td>
+                </tr>
+                <tr>
+                    <th><label for="max_pages">Número máximo de páginas</label></th>
+                    <td><input name="max_pages" type="number" id="max_pages" value="<?php echo esc_attr($max_pages); ?>" min="1" max="100" required></td>
+                </tr>
+                <tr>
+                    <th><label for="sync_frequency">Frecuencia de sincronización automática</label></th>
+                    <td>
+                        <select name="sync_frequency" id="sync_frequency">
+                            <?php foreach ($frequencies as $key => $label): ?>
+                                <option value="<?php echo esc_attr($key); ?>" <?php selected($frequency, $key); ?>>
+                                    <?php echo esc_html($label); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </td>
+                </tr>
+                <tr>
+                    <th>Última sincronización automática</th>
+                    <td><?php echo esc_html($last_sync); ?></td>
+                </tr>
             </table>
             <button type="submit" class="button button-primary">Guardar configuración</button>
         </form>
 
         <hr>
-        <h2>Información del sistema</h2>
-        <p><strong>Última sincronización automática:</strong>
-            <?php
-            $last = get_option('engel_last_sync_time');
-            echo $last ? esc_html($last) : 'Aún no se ha ejecutado.';
-            ?>
-        </p>
-        <p><strong>Frecuencia actual:</strong>
-            <?php
-            $freqs = [
-                'hourly' => 'Cada 1 hora',
-                'twicedaily' => 'Cada 12 horas',
-                'daily' => 'Cada 24 horas',
-            ];
-            $current = get_option('engel_sync_frequency', 'hourly');
-            echo esc_html($freqs[$current] ?? $current);
-            ?>
-        </p>
+
+        <h2>Historial de sincronización</h2>
+        <?php if (!empty($logs)): ?>
+            <table class="widefat striped">
+                <thead>
+                    <tr>
+                        <th>Fecha</th>
+                        <th>Tipo</th>
+                        <th>Mensaje</th>
+                        <th>Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach (array_reverse($logs) as $entry): ?>
+                        <tr>
+                            <td><?php echo esc_html($entry['time']); ?></td>
+                            <td><?php echo esc_html($entry['type']); ?></td>
+                            <td><?php echo esc_html($entry['message']); ?></td>
+                            <td><?php echo isset($entry['count']) ? intval($entry['count']) : '—'; ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        <?php else: ?>
+            <p>No hay registros disponibles.</p>
+        <?php endif; ?>
     </div>
     <?php
 }
