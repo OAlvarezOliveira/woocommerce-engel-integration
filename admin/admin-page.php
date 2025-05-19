@@ -41,6 +41,7 @@ function engel_sync_admin_page() {
                 case 'save_pagination_settings':
                     $elements_per_page = intval($_POST['elements_per_page'] ?? 10);
                     $max_pages = intval($_POST['max_pages'] ?? 5);
+                    $frequency = sanitize_text_field($_POST['sync_frequency'] ?? 'hourly');
 
                     if ($elements_per_page < 1) $elements_per_page = 10;
                     if ($elements_per_page > 100) $elements_per_page = 100;
@@ -49,13 +50,13 @@ function engel_sync_admin_page() {
 
                     update_option('engel_elements_per_page', $elements_per_page);
                     update_option('engel_max_pages', $max_pages);
+                    update_option('engel_sync_frequency', $frequency);
 
-                    $message = "Configuración de paginación guardada.";
-                    break;
+                    // Reprogramar cron
+                    wp_clear_scheduled_hook('engel_sync_batch_event');
+                    wp_schedule_event(time(), $frequency, 'engel_sync_batch_event');
 
-                case 'batch_sync':
-                    engel_sync_start_batch();
-                    $message = "Sincronización batch iniciada. Se procesará en segundo plano.";
+                    $message = "Configuración guardada correctamente.";
                     break;
             }
         } catch (Exception $e) {
@@ -111,17 +112,10 @@ function engel_sync_admin_page() {
             <button type="submit" class="button button-primary">Sincronizar todos los productos</button>
         </form>
 
-        <form method="post" style="display:inline-block; margin-right:10px;">
+        <form method="post" style="display:inline-block;">
             <?php wp_nonce_field('engel_sync_action', 'engel_sync_nonce'); ?>
             <input type="hidden" name="action" value="stock_sync" />
             <button type="submit" class="button button-secondary">Sincronizar solo stock</button>
-        </form>
-
-        <!-- NUEVO botón para sincronización batch -->
-        <form method="post" style="display:inline-block;">
-            <?php wp_nonce_field('engel_sync_action', 'engel_sync_nonce'); ?>
-            <input type="hidden" name="action" value="batch_sync" />
-            <button type="submit" class="button button-secondary">Sincronizar productos (Batch WP-Cron)</button>
         </form>
 
         <hr>
@@ -135,7 +129,7 @@ function engel_sync_admin_page() {
 
         <hr>
 
-        <h2>Configuración de paginación</h2>
+        <h2>Configuración de paginación y cron</h2>
         <form method="post">
             <?php wp_nonce_field('engel_sync_action', 'engel_sync_nonce'); ?>
             <input type="hidden" name="action" value="save_pagination_settings" />
@@ -149,11 +143,48 @@ function engel_sync_admin_page() {
                         <th><label for="max_pages">Número máximo de páginas</label></th>
                         <td><input name="max_pages" type="number" id="max_pages" value="<?php echo esc_attr(get_option('engel_max_pages', 5)); ?>" min="1" max="100" required></td>
                     </tr>
+                    <tr>
+                        <th><label for="sync_frequency">Frecuencia de sincronización automática</label></th>
+                        <td>
+                            <select name="sync_frequency" id="sync_frequency">
+                                <?php
+                                $current = get_option('engel_sync_frequency', 'hourly');
+                                $options = [
+                                    'hourly' => 'Cada 1 hora',
+                                    'twicedaily' => 'Cada 12 horas',
+                                    'daily' => 'Cada 24 horas',
+                                ];
+                                foreach ($options as $value => $label) {
+                                    echo '<option value="' . esc_attr($value) . '" ' . selected($current, $value, false) . '>' . esc_html($label) . '</option>';
+                                }
+                                ?>
+                            </select>
+                        </td>
+                    </tr>
                 </tbody>
             </table>
             <button type="submit" class="button button-primary">Guardar configuración</button>
         </form>
 
+        <hr>
+        <h2>Información del sistema</h2>
+        <p><strong>Última sincronización automática:</strong>
+            <?php
+            $last = get_option('engel_last_sync_time');
+            echo $last ? esc_html($last) : 'Aún no se ha ejecutado.';
+            ?>
+        </p>
+        <p><strong>Frecuencia actual:</strong>
+            <?php
+            $freqs = [
+                'hourly' => 'Cada 1 hora',
+                'twicedaily' => 'Cada 12 horas',
+                'daily' => 'Cada 24 horas',
+            ];
+            $current = get_option('engel_sync_frequency', 'hourly');
+            echo esc_html($freqs[$current] ?? $current);
+            ?>
+        </p>
     </div>
     <?php
 }

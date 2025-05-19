@@ -22,7 +22,6 @@ class Engel_Product_Sync {
     use Engel_WC_Sync_Trait;
 
     public function __construct() {
-        // Opcional: aumentar tiempo y memoria para evitar timeout
         set_time_limit(300);
         ini_set('memory_limit', '512M');
     }
@@ -77,12 +76,6 @@ class Engel_Product_Sync {
         return $file_path;
     }
 
-    /**
-     * Obtiene todos los productos paginados, con límite configurable.
-     *
-     * @return array
-     * @throws Exception
-     */
     public function get_all_products() {
         $token = $this->get_token();
         if (!$token) {
@@ -130,17 +123,14 @@ class Engel_Product_Sync {
             $this->log("Página $page: recibidos $count productos");
 
             $all_products = array_merge($all_products, $data);
-
             $page++;
 
         } while ($count === $elements_per_page);
 
         $this->log("Total productos obtenidos: " . count($all_products));
-
         return $all_products;
     }
 
-    // NUEVO método para sincronizar solo una página
     public function sync_products_page(int $page = 0, int $elements_per_page = 50) {
         $token = $this->get_token();
         if (!$token) {
@@ -175,7 +165,6 @@ class Engel_Product_Sync {
         $this->sync_all_products_to_wc($data);
         $this->log("Página $page sincronizada correctamente.");
 
-        // Retornar si llenó la página (para saber si hay que seguir)
         return count($data) === $elements_per_page;
     }
 
@@ -188,14 +177,12 @@ class Engel_Product_Sync {
     }
 }
 
-// Función global para logs centralizados
 function engel_log($message) {
     if (defined('WP_DEBUG') && WP_DEBUG) {
         error_log('[Engel Sync] ' . $message);
     }
 }
 
-// Instancia del plugin para usar en acciones
 function engel_get_sync_instance() {
     static $instance = null;
     if ($instance === null) {
@@ -204,12 +191,10 @@ function engel_get_sync_instance() {
     return $instance;
 }
 
-// Añade menú en admin
 add_action('admin_menu', function () {
     add_menu_page('Engel Sync', 'Engel Sync', 'manage_options', 'engel-sync', 'engel_sync_admin_page');
 });
 
-// Añade página de ajustes para configuración de paginación
 add_action('admin_menu', function () {
     add_submenu_page(
         'engel-sync',
@@ -221,7 +206,6 @@ add_action('admin_menu', function () {
     );
 });
 
-// Página de configuración para elementos por página y páginas máximas
 function engel_sync_settings_page() {
     if (!current_user_can('manage_options')) {
         wp_die('No tienes permisos para acceder a esta página.');
@@ -282,7 +266,6 @@ function engel_sync_batch_process() {
         $instance->log('Sincronización batch completada.');
     }
 }
-
 add_action('engel_sync_batch_process_hook', 'engel_sync_batch_process');
 
 function engel_sync_start_batch() {
@@ -291,3 +274,22 @@ function engel_sync_start_batch() {
         wp_schedule_single_event(time(), 'engel_sync_batch_process_hook');
     }
 }
+
+// 🔄 Nueva tarea automática programada
+function engel_register_sync_cron() {
+    $frequency = get_option('engel_sync_frequency', 'hourly');
+    if (!in_array($frequency, ['hourly', 'twicedaily', 'daily'])) {
+        $frequency = 'hourly';
+    }
+
+    if (!wp_next_scheduled('engel_sync_batch_event')) {
+        wp_schedule_event(time(), $frequency, 'engel_sync_batch_event');
+    }
+}
+add_action('init', 'engel_register_sync_cron');
+
+// 🔁 Acción programada automáticamente
+add_action('engel_sync_batch_event', function () {
+    engel_sync_start_batch();
+    update_option('engel_last_sync_time', current_time('mysql'));
+});
