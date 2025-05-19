@@ -2,7 +2,7 @@
 /*
 Plugin Name: Engel WooCommerce Sync
 Description: Sincroniza productos de Nova Engel con WooCommerce, login/logout y descarga CSV.
-Version: 1.4
+Version: 1.3
 Author: OAlvarezOliveira
 */
 
@@ -14,53 +14,148 @@ $base = plugin_dir_path(__FILE__);
 require_once $base . 'includes/trait-engel-connection.php';
 require_once $base . 'includes/trait-engel-wc-sync.php';
 
-// Carga clase para exportación background
-require_once $base . 'includes/class-engel-export-background.php';
+// Carga página admin
+require_once $base . 'admin/admin-page.php';
 
-// ** NO INCLUIR admin-page.php aquí directamente **
+// Clase principal que usa traits
+class Engel_Product_Sync {
+    use Engel_Connection_Trait;
+    use Engel_WC_Sync_Trait;
 
-// Añadir página de configuración simple
-add_action('admin_menu', function () {
-    add_options_page('Engel Sync Config', 'Engel Sync Config', 'manage_options', 'engel-sync-settings', 'engel_sync_settings_page');
-});
+    public function __construct() {
+        // Nada aquí, el token se gestiona en el trait
+    }
 
-// Función para mostrar página configuración
-function engel_sync_settings_page() {
-    ?>
-    <div class="wrap">
-        <h1>Configuración de Engel Sync</h1>
-        <form method="post" action="options.php">
-            <?php
-            settings_fields('engel_sync_settings');
-            do_settings_sections('engel_sync_settings');
-            submit_button();
-            ?>
-        </form>
-    </div>
-    <?php
+    public function run_full_sync() {
+        $products = $this->get_all_products();
+        $this->sync_all_products_to_wc($products);
+        $this->log('Sincronización completa finalizada.');
+    }
+
+    public function run_stock_sync() {
+        $products = $this->get_all_products();
+        $this->sync_stock_only_to_wc($products);
+        $this->log('Sincronización de stock finalizada.');
+    }
+
+    public function export_products_to_csv($filename = 'engel_products.csv', $language = 'es') {
+        $products = $this->get_all_products();
+        $this->log("Exportando " . count($products) . " productos a CSV");
+
+        $upload_dir = wp_upload_dir();
+        $file_path = $upload_dir['basedir'] . '/' . $filename;
+
+        $file = fopen($file_path, 'w');
+        if (!$file) {
+            throw new Exception('No se pudo crear archivo CSV');
+        }
+
+        $headers = ['ID', 'SKU', 'Nombre', 'Descripción corta', 'Descripción larga', 'Precio', 'Stock', 'Marca', 'EAN', 'Categoría', 'IVA', 'Peso (kg)'];
+        fputcsv($file, $headers);
+
+        foreach ($products as $p) {
+            $row = [
+                $p['Id'] ?? '',
+                $p['ItemId'] ?? '',
+                $p['Description'] ?? '',
+                $p['CompleteDescription'] ?? '',
+                $p['Price'] ?? '',
+                $p['Stock'] ?? '',
+                $p['BrandName'] ?? '',
+                isset($p['EANs'][0]) ? $p['EANs'][0] : '',
+                isset($p['Families'][0]) ? $p['Families'][0] : '',
+                $p['IVA'] ?? '',
+                $p['Kgs'] ?? '',
+            ];
+            fputcsv($file, $row);
+        }
+
+        fclose($file);
+        $this->log("CSV exportado: $file_path");
+
+        return $file_path;
+    }
+
+    /**
+     * Obtiene todos los productos paginados, con límite configurable.
+     *
+     * @return array
+     * @throws Exception
+     */
+    public function get_all_products() {
+        $token = $this->get_token();
+        if (!$token) {
+            throw new Exception('Token de autenticación no disponible');
+        }
+
+        $elements_per_page = (int) get_option('engel_elements_per_page', 10);
+        $max_pages = (int) get_option('engel_max_pages', 5);
+
+        $all_products = [];
+        $page = 0;
+
+        do {
+            if ($page >= $max_pages) {
+                $this->log("Límite máximo de páginas ($max_pages) alcanzado.");
+                break;
+            }
+
+            $url = "https://drop.novaengel.com/api/products/paging/{$token}/{$page}/{$elements_per_page}/es";
+
+            $this->log("Solicitando página $page con $elements_per_page productos por página.");
+
+            $response = wp_remote_get($url, [
+                'headers' => [
+                    'Authorization' => "Bearer $token",
+                    'Accept' => 'application/json',
+                ],
+                'timeout' => 30,
+            ]);
+
+            if (is_wp_error($response)) {
+                $this->log("Error al obtener productos página $page: " . $response->get_error_message());
+                break;
+            }
+
+            $body = wp_remote_retrieve_body($response);
+            $data = json_decode($body, true);
+
+            if (!is_array($data)) {
+                $this->log("Respuesta inválida en página $page: $body");
+                break;
+            }
+
+            $count = count($data);
+            $this->log("Página $page: recibidos $count productos");
+
+            $all_products = array_merge($all_products, $data);
+
+            $page++;
+
+        } while ($count === $elements_per_page);
+
+        $this->log("Total productos obtenidos: " . count($all_products));
+
+        return $all_products;
+    }
+
+    private function log(string $message) {
+        if (function_exists('engel_log')) {
+            engel_log($message);
+        } else {
+            error_log('[Engel Sync] ' . $message);
+        }
+    }
 }
 
-add_action('admin_init', function () {
-    register_setting('engel_sync_settings', 'engel_elements_per_page');
-    register_setting('engel_sync_settings', 'engel_max_pages');
+// Función global para logs centralizados
+function engel_log($message) {
+    if (defined('WP_DEBUG') && WP_DEBUG) {
+        error_log('[Engel Sync] ' . $message);
+    }
+}
 
-    add_settings_section('engel_sync_section', 'Paginación para exportación CSV', null, 'engel_sync_settings');
-
-    add_settings_field('engel_elements_per_page', 'Productos por página', function () {
-        $value = get_option('engel_elements_per_page', 100);
-        echo "<input type='number' name='engel_elements_per_page' value='" . esc_attr($value) . "' min='1' max='500' />";
-    }, 'engel_sync_settings', 'engel_sync_section');
-
-    add_settings_field('engel_max_pages', 'Máximo de páginas', function () {
-        $value = get_option('engel_max_pages', 200);
-        echo "<input type='number' name='engel_max_pages' value='" . esc_attr($value) . "' min='1' max='1000' />";
-    }, 'engel_sync_settings', 'engel_sync_section');
-});
-
-// Clase principal (igual que antes, la omito aquí para no alargar)
-// [Mantén toda la clase Engel_Product_Sync tal cual la tienes]
-
-// Instancia singleton
+// Instancia del plugin para usar en acciones
 function engel_get_sync_instance() {
     static $instance = null;
     if ($instance === null) {
@@ -69,59 +164,62 @@ function engel_get_sync_instance() {
     return $instance;
 }
 
-// Agregar página principal en el menú admin
+// Añade menú en admin
 add_action('admin_menu', function () {
     add_menu_page('Engel Sync', 'Engel Sync', 'manage_options', 'engel-sync', 'engel_sync_admin_page');
 });
 
-// Función para mostrar contenido admin (incluye el archivo admin-page.php)
-function engel_sync_admin_page() {
-    include plugin_dir_path(__FILE__) . 'admin/admin-page.php';
-}
-
-// Encolar scripts para la página admin
-add_action('admin_enqueue_scripts', function ($hook) {
-    // El hook para la página es toplevel_page_engel-sync
-    if ($hook !== 'toplevel_page_engel-sync') return;
-
-    wp_enqueue_script(
-        'engel-sync-admin',
-        plugin_dir_url(__FILE__) . 'admin/engel-sync-admin.js',
-        ['jquery'],
-        '1.0',
-        true
+// Añade página de ajustes para configuración de paginación
+add_action('admin_menu', function () {
+    add_submenu_page(
+        'engel-sync',
+        'Configuración de Paginación',
+        'Configuración Paginación',
+        'manage_options',
+        'engel-sync-settings',
+        'engel_sync_settings_page'
     );
-
-    wp_localize_script('engel-sync-admin', 'engelSync', [
-        'ajax_url' => admin_url('admin-ajax.php'),
-        'nonce' => wp_create_nonce('engel_stock_sync_nonce'),
-    ]);
 });
 
-// Handler AJAX para sincronización stock por página
-add_action('wp_ajax_engel_process_stock_sync_page', function () {
-    check_ajax_referer('engel_stock_sync_nonce');
-
-    $page = isset($_POST['page']) ? intval($_POST['page']) : 0;
-
-    $sync = engel_get_sync_instance();
-
-    $elements_per_page = intval(get_option('engel_elements_per_page', 100));
-
-    try {
-        $has_more = $sync->run_stock_sync_page($page, $elements_per_page);
-
-        wp_send_json_success([
-            'next_page' => $has_more ? $page + 1 : false
-        ]);
-    } catch (Exception $e) {
-        wp_send_json_error($e->getMessage());
+// Página de configuración para elementos por página y páginas máximas
+function engel_sync_settings_page() {
+    if (!current_user_can('manage_options')) {
+        wp_die('No tienes permisos para acceder a esta página.');
     }
-});
 
-// Función global para logs
-function engel_log($message) {
-    if (defined('WP_DEBUG') && WP_DEBUG) {
-        error_log('[Engel Sync] ' . $message);
+    if (isset($_POST['submit'])) {
+        check_admin_referer('engel_sync_settings_nonce');
+
+        $elements_per_page = max(1, intval($_POST['engel_elements_per_page']));
+        $max_pages = max(1, intval($_POST['engel_max_pages']));
+
+        update_option('engel_elements_per_page', $elements_per_page);
+        update_option('engel_max_pages', $max_pages);
+
+        echo '<div class="notice notice-success is-dismissible"><p>Configuración guardada correctamente.</p></div>';
     }
+
+    $elements_per_page = get_option('engel_elements_per_page', 10);
+    $max_pages = get_option('engel_max_pages', 5);
+    ?>
+    <div class="wrap">
+        <h1>Configuración de Paginación - Engel Sync</h1>
+        <form method="post">
+            <?php wp_nonce_field('engel_sync_settings_nonce'); ?>
+            <table class="form-table">
+                <tr>
+                    <th scope="row"><label for="engel_elements_per_page">Productos por página</label></th>
+                    <td><input name="engel_elements_per_page" type="number" id="engel_elements_per_page" value="<?php echo esc_attr($elements_per_page); ?>" min="1" max="1000" required></td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="engel_max_pages">Número máximo de páginas</label></th>
+                    <td><input name="engel_max_pages" type="number" id="engel_max_pages" value="<?php echo esc_attr($max_pages); ?>" min="1" max="100" required></td>
+                </tr>
+            </table>
+            <p class="submit">
+                <button type="submit" name="submit" class="button button-primary">Guardar cambios</button>
+            </p>
+        </form>
+    </div>
+    <?php
 }
