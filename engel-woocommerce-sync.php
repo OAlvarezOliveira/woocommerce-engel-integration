@@ -77,56 +77,54 @@ class Engel_Product_Sync {
     }
 
     public function get_all_products($elements_per_page = 100, $language = 'es') {
-        $token = $this->get_token();
-        if (!$token) {
-            throw new Exception('Token de autenticación no disponible');
-        }
-
-        $all_products = [];
-        $page = 0;
-
-        do {
-            $url = "https://drop.novaengel.com/api/products/paging/{$token}/{$page}/{$elements_per_page}/{$language}";
-
-            $response = wp_remote_get($url, [
-                'headers' => [
-                    'Authorization' => "Bearer $token",
-                    'Accept' => 'application/json',
-                ],
-                'timeout' => 30,
-            ]);
-
-            if (is_wp_error($response)) {
-                $this->log("Error al obtener productos página $page: " . $response->get_error_message());
-                break;
-            }
-
-            $body = wp_remote_retrieve_body($response);
-            $data = json_decode($body, true);
-
-            if (!is_array($data)) {
-                $this->log("Respuesta inválida en página $page: $body");
-                break;
-            }
-
-            $count = count($data);
-            $all_products = array_merge($all_products, $data);
-
-            $page++;
-
-        } while ($count === $elements_per_page);
-
-        return $all_products;
+    $token = $this->get_token();
+    if (!$token) {
+        throw new Exception('Token de autenticación no disponible');
     }
 
-    private function log(string $message) {
-        if (function_exists('engel_log')) {
-            engel_log($message);
-        } else {
-            error_log('[Engel Sync] ' . $message);
+    $all_products = [];
+    $page = 0;
+
+    do {
+        $url = "https://drop.novaengel.com/api/products/paging/{$token}/{$page}/{$elements_per_page}/{$language}";
+
+        $this->log("Requesting page $page, $elements_per_page elements");
+
+        $response = wp_remote_get($url, [
+            'headers' => [
+                'Authorization' => "Bearer $token",
+                'Accept' => 'application/json',
+            ],
+            'timeout' => 30,
+        ]);
+
+        if (is_wp_error($response)) {
+            $this->log("Error al obtener productos página $page: " . $response->get_error_message());
+            break;
         }
-    }
+
+        $body = wp_remote_retrieve_body($response);
+        $data = json_decode($body, true);
+
+        if (!is_array($data)) {
+            $this->log("Respuesta inválida en página $page: $body");
+            break;
+        }
+
+        $count = count($data);
+        $this->log("Página $page: recibidos $count productos");
+
+        $all_products = array_merge($all_products, $data);
+
+        $page++;
+
+    } while ($count === $elements_per_page);
+
+    $this->log("Total productos obtenidos: " . count($all_products));
+
+    return $all_products;
 }
+
 
 // Función global para logs centralizados
 function engel_log($message) {
