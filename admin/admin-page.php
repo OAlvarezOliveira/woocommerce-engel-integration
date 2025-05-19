@@ -73,6 +73,13 @@ function engel_sync_admin_page() {
         'twicedaily' => 'Cada 12 horas',
         'daily' => 'Cada 24 horas'
     ];
+
+    // Estado exportación
+    $in_progress = get_option('engel_export_in_progress', false);
+    $export_page = (int) get_option('engel_export_page', 0);
+    $export_filename = get_option('engel_export_filename', '');
+    $export_url = wp_upload_dir()['baseurl'] . '/' . $export_filename;
+    $export_file_path = wp_upload_dir()['basedir'] . '/' . $export_filename;
     ?>
     <div class="wrap">
         <h1>Engel WooCommerce Sync</h1>
@@ -126,12 +133,31 @@ function engel_sync_admin_page() {
 
         <hr>
 
-        <h2>Exportar productos</h2>
+        <h2>Exportar productos (manual)</h2>
         <form method="post">
             <?php wp_nonce_field('engel_sync_action', 'engel_sync_nonce'); ?>
             <input type="hidden" name="action" value="export_csv" />
             <button type="submit" class="button button-secondary">Exportar a CSV</button>
         </form>
+
+        <h3>Exportar productos (en segundo plano)</h3>
+        <div id="engel-export-status">
+            <p><strong>Estado exportación:</strong> <span id="engel-status-text">
+                <?php
+                if ($in_progress) {
+                    echo "En progreso (Página $export_page de $max_pages)";
+                } elseif ($export_filename && file_exists($export_file_path)) {
+                    echo "Completado - <a href='$export_url' target='_blank'>Descargar CSV</a>";
+                } else {
+                    echo "No iniciada";
+                }
+                ?>
+            </span></p>
+            <div id="engel-export-spinner" style="display: <?php echo $in_progress ? 'inline-block' : 'none'; ?>;">
+                <img src="<?php echo admin_url('images/spinner.gif'); ?>" alt="Cargando...">
+            </div>
+        </div>
+        <button id="engel_export_start" class="button button-secondary">Exportar productos a CSV</button>
 
         <hr>
 
@@ -196,5 +222,63 @@ function engel_sync_admin_page() {
             <p>No hay registros disponibles.</p>
         <?php endif; ?>
     </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const interval = setInterval(() => {
+            fetch(ajaxurl + '?action=engel_get_export_status')
+                .then(res => res.json())
+                .then(data => {
+                    const statusText = document.getElementById('engel-status-text');
+                    const spinner = document.getElementById('engel-export-spinner');
+
+                    if (data.in_progress) {
+                        statusText.textContent = `En progreso (Página ${data.page} de ${data.max_pages})`;
+                        spinner.style.display = 'inline-block';
+                    } else if (data.file_url) {
+                        statusText.innerHTML = `Completado - <a href="${data.file_url}" target="_blank">Descargar CSV</a>`;
+                        spinner.style.display = 'none';
+                        clearInterval(interval);
+                    } else {
+                        statusText.textContent = 'No iniciada';
+                        spinner.style.display = 'none';
+                    }
+                });
+        }, 5000);
+    });
+
+    document.addEventListener('DOMContentLoaded', function () {
+        const exportBtn = document.getElementById('engel_export_start');
+        if (!exportBtn) return;
+
+        exportBtn.addEventListener('click', async () => {
+            exportBtn.disabled = true;
+            let response = await fetch(ajaxurl + '?action=engel_start_export_csv');
+            let result = await response.json();
+            if (!result.success) {
+                alert('Error: ' + result.data);
+                exportBtn.disabled = false;
+                return;
+            }
+
+            let keepGoing = true;
+            while (keepGoing) {
+                let res = await fetch(ajaxurl + '?action=engel_export_csv_next_page');
+                let json = await res.json();
+                if (json.success && json.data?.done) {
+                    alert('Exportación completada');
+                    keepGoing = false;
+                } else if (!json.success) {
+                    alert('Error: ' + json.data);
+                    keepGoing = false;
+                } else {
+                    console.log('Página exportada:', json.data?.page);
+                }
+            }
+
+            exportBtn.disabled = false;
+        });
+    });
+    </script>
     <?php
 }

@@ -13,6 +13,7 @@ $base = plugin_dir_path(__FILE__);
 // Carga traits
 require_once $base . 'includes/trait-engel-connection.php';
 require_once $base . 'includes/trait-engel-wc-sync.php';
+require_once $base . 'includes/class-engel-export-background.php';
 
 // Carga página admin
 require_once $base . 'admin/admin-page.php';
@@ -75,6 +76,23 @@ class Engel_Product_Sync {
 
         return $file_path;
     }
+
+    add_action('wp_ajax_engel_get_export_status', function () {
+    $in_progress = get_option('engel_export_in_progress', false);
+    $page = (int) get_option('engel_export_page', 0);
+    $max_pages = (int) get_option('engel_max_pages', 100);
+    $filename = get_option('engel_export_filename', '');
+    $file_path = wp_upload_dir()['basedir'] . '/' . $filename;
+    $file_url = file_exists($file_path) ? wp_upload_dir()['baseurl'] . '/' . $filename : '';
+
+    wp_send_json([
+        'in_progress' => $in_progress,
+        'page' => $page,
+        'max_pages' => $max_pages,
+        'file_url' => $file_url,
+    ]);
+});
+
 
     public function get_all_products() {
         $token = $this->get_token();
@@ -395,5 +413,113 @@ add_action('admin_post_engel_export_csv', function () {
         exit;
     } catch (Exception $e) {
         wp_die('Error al exportar CSV: ' . $e->getMessage());
+    } 
+});
+// INICIAR EXPORTACIÓN CSV
+add_action('wp_ajax_engel_start_export_csv', function () {
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error('No autorizado');
     }
+
+    $filename = 'engel_export_' . time() . '.csv';
+    $filepath = wp_upload_dir()['basedir'] . '/' . $filename;
+
+    // Crea el archivo CSV y escribe encabezados
+    $file = fopen($filepath, 'w');
+    if (!$file) {
+        wp_send_json_error('No se pudo crear el archivo CSV');
+    }
+
+    $headers = ['ID', 'SKU', 'Nombre', 'Descripción corta', 'Descripción larga', 'Precio', 'Stock', 'Marca', 'EAN', 'Categoría', 'IVA', 'Peso (kg)'];
+    fputcsv($file, $headers);
+    fclose($file);
+
+    // Guardar opciones de progreso
+    update_option('engel_export_in_progress', true);
+    update_option('engel_export_page', 0);
+    update_option('engel_export_filename', $filename);
+
+    wp_send_json_success(['message' => 'Exportación iniciada']);
+});
+
+// PROCESAR SIGUIENTE PÁGINA DE EXPORTACIÓN
+add_action('wp_ajax_engel_export_csv_next_page', function () {
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error('No autorizado');
+    }
+
+    $page = (int) get_option('engel_export_page', 0);
+    $elements_per_page = (int) get_option('engel_elements_per_page', 10);
+    $filename = get_option('engel_export_filename', '');
+    $filepath = wp_upload_dir()['basedir'] . '/' . $filename;
+
+    if (!$filename || !file_exists($filepath)) {
+        wp_send_json_error('Archivo CSV no encontrado');
+    }
+
+    // Obtener instancia
+    $instance = engel_get_sync_instance();
+    if (!$instance) {
+        wp_send_json_error('Instancia no disponible');
+    }
+
+    $token = $instance->get_token();
+    if (!$token) {
+        wp_send_json_error('Token inválido');
+    }
+
+    // Obtener datos de API
+    $url = "https://drop.novaengel.com/api/products/paging/{$token}/{$page}/{$elements_per_page}/es";
+    $response = wp_remote_get($url, [
+        'headers' => [
+            'Authorization' => "Bearer $token",
+            'Accept' => 'application/json',
+        ],
+        'timeout' => 30,
+    ]);
+
+    if (is_wp_error($response)) {
+        wp_send_json_error('Error al obtener datos: ' . $response->get_error_message());
+    }
+
+    $data = json_decode(wp_remote_retrieve_body($response), true);
+    if (!is_array($data) || empty($data)) {
+        // Finaliza exportación
+        update_option('engel_export_in_progress', false);
+        delete_option('engel_export_page');
+        wp_send_json_success(['done' => true]);
+    }
+
+    // Agregar datos al archivo CSV
+    $file = fopen($filepath, 'a');
+    if (!$file) {
+        wp_send_json_error('No se pudo abrir el archivo CSV para escribir');
+    }
+
+    foreach ($data as $p) {
+        $row = [
+            $p['Id'] ?? '',
+            $p['ItemId'] ?? '',
+            $p['Description'] ?? '',
+            $p['CompleteDescription'] ?? '',
+            $p['Price'] ?? '',
+            $p['Stock'] ?? '',
+            $p['BrandName'] ?? '',
+            isset($p['EANs'][0]) ? $p['EANs'][0] : '',
+            isset($p['Families'][0]) ? $p['Families'][0] : '',
+            $p['IVA'] ?? '',
+            $p['Kgs'] ?? '',
+        ];
+        fputcsv($file, $row);
+    }
+    fclose($file);
+
+    // Incrementar página y continuar
+    update_option('engel_export_page', $page + 1);
+
+    wp_send_json_success([
+        'page' => $page + 1,
+        'count' => count($data),
+        'filename' => $filename,
+    ]);
 });
