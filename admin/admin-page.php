@@ -5,20 +5,7 @@ function engel_sync_admin_page() {
     $sync = engel_get_sync_instance();
     $message = '';
 
-    // Guardar configuración si viene del formulario de paginación
-    if (isset($_POST['save_settings'])) {
-        check_admin_referer('engel_sync_action', 'engel_sync_nonce');
-
-        $elements_per_page = intval($_POST['elements_per_page'] ?? 10);
-        $max_pages = intval($_POST['max_pages'] ?? 5);
-
-        update_option('engel_elements_per_page', $elements_per_page);
-        update_option('engel_max_pages', $max_pages);
-
-        $message = 'Configuración guardada.';
-    }
-    // Procesar otras acciones
-    elseif (isset($_POST['action'])) {
+    if (isset($_POST['action'])) {
         check_admin_referer('engel_sync_action', 'engel_sync_nonce');
 
         try {
@@ -50,18 +37,28 @@ function engel_sync_admin_page() {
                     $url = wp_upload_dir()['baseurl'] . '/' . basename($file_path);
                     $message = "CSV exportado correctamente. <a href='$url' target='_blank'>Descargar CSV</a>";
                     break;
+
+                case 'save_pagination_settings':
+                    $elements_per_page = intval($_POST['elements_per_page'] ?? 10);
+                    $max_pages = intval($_POST['max_pages'] ?? 5);
+
+                    if ($elements_per_page < 1) $elements_per_page = 10;
+                    if ($elements_per_page > 100) $elements_per_page = 100;
+                    if ($max_pages < 1) $max_pages = 5;
+                    if ($max_pages > 100) $max_pages = 100;
+
+                    update_option('engel_elements_per_page', $elements_per_page);
+                    update_option('engel_max_pages', $max_pages);
+
+                    $message = "Configuración de paginación guardada.";
+                    break;
             }
         } catch (Exception $e) {
             $message = 'Error: ' . $e->getMessage();
         }
     }
 
-    // Obtener token para mostrar estado
     $token = $sync->get_token();
-
-    // Leer configuración guardada para paginación
-    $elements_per_page = get_option('engel_elements_per_page', 10);
-    $max_pages = get_option('engel_max_pages', 5);
     ?>
     <div class="wrap">
         <h1>Engel WooCommerce Sync</h1>
@@ -71,25 +68,6 @@ function engel_sync_admin_page() {
                 <p><?php echo wp_kses_post($message); ?></p>
             </div>
         <?php endif; ?>
-
-        <h2>Configuración de paginación</h2>
-        <form method="post" style="margin-bottom:20px;">
-            <?php wp_nonce_field('engel_sync_action', 'engel_sync_nonce'); ?>
-            <input type="hidden" name="save_settings" value="1" />
-            <table class="form-table" role="presentation">
-                <tbody>
-                    <tr>
-                        <th><label for="elements_per_page">Productos por página</label></th>
-                        <td><input name="elements_per_page" type="number" id="elements_per_page" value="<?php echo esc_attr($elements_per_page); ?>" min="1" max="100" required></td>
-                    </tr>
-                    <tr>
-                        <th><label for="max_pages">Número máximo de páginas</label></th>
-                        <td><input name="max_pages" type="number" id="max_pages" value="<?php echo esc_attr($max_pages); ?>" min="1" max="100" required></td>
-                    </tr>
-                </tbody>
-            </table>
-            <button type="submit" class="button button-primary">Guardar configuración</button>
-        </form>
 
         <h2>Autenticación</h2>
         <?php if ($token): ?>
@@ -142,6 +120,28 @@ function engel_sync_admin_page() {
             <input type="hidden" name="action" value="export_csv" />
             <button type="submit" class="button button-secondary">Exportar a CSV</button>
         </form>
+
+        <hr>
+
+        <h2>Configuración de paginación</h2>
+        <form method="post">
+            <?php wp_nonce_field('engel_sync_action', 'engel_sync_nonce'); ?>
+            <input type="hidden" name="action" value="save_pagination_settings" />
+            <table class="form-table" role="presentation">
+                <tbody>
+                    <tr>
+                        <th><label for="elements_per_page">Productos por página</label></th>
+                        <td><input name="elements_per_page" type="number" id="elements_per_page" value="<?php echo esc_attr(get_option('engel_elements_per_page', 10)); ?>" min="1" max="100" required></td>
+                    </tr>
+                    <tr>
+                        <th><label for="max_pages">Número máximo de páginas</label></th>
+                        <td><input name="max_pages" type="number" id="max_pages" value="<?php echo esc_attr(get_option('engel_max_pages', 5)); ?>" min="1" max="100" required></td>
+                    </tr>
+                </tbody>
+            </table>
+            <button type="submit" class="button button-primary">Guardar configuración</button>
+        </form>
+
     </div>
     <?php
 }
