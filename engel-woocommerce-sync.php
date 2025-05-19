@@ -1,6 +1,6 @@
 <?php
 /*
-Plugin Name: Engel WooCommerce Sync
+Plugin Name: Engel WooCommerce Sync Version: 1.4
 Description: Sincroniza productos de Nova Engel con WooCommerce, login/logout y descarga CSV.
 Version: 1.4
 Author: OAlvarezOliveira
