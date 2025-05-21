@@ -1,5 +1,4 @@
 <?php
-// includes/class-product-sync.php
 
 class Engel_Product_Sync {
     public static function sync_all_products($products) {
@@ -35,7 +34,7 @@ class Engel_Product_Sync {
                     'alto' => $product['Alto'] ?? 0,
                     'fondo' => $product['Fondo'] ?? 0,
                     'pais_fabricacion' => $product['PaisFabricacion'] ?? '',
-                    'oferta' => $product['EsOferta'] ? 1 : 0,
+                    'oferta' => isset($product['EsOferta']) ? (int) $product['EsOferta'] : 0,
                     'fecha_actualizacion' => current_time('mysql'),
                 ];
 
@@ -88,9 +87,15 @@ class Engel_Product_Sync {
 
 // Hook para ejecutar la actualización de stock
 add_action('engel_daily_stock_sync', function () {
-    $api = new Engel_API_Client();
-    $stock = $api->fetch_stock_updates();
-    Engel_Product_Sync::update_stock_only($stock);
+    $token = get_option('engel_sync_token');
+    $url = get_option('engel_sync_url');
+    if ($token && $url) {
+        $api = new Engel_API_Client($url, $token);
+        $stock = $api->fetch_stock_updates();
+        if (!is_wp_error($stock)) {
+            Engel_Product_Sync::update_stock_only($stock);
+        }
+    }
 });
 
 // Activar y desactivar cron
