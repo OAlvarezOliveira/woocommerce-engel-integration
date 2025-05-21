@@ -1,74 +1,47 @@
 <?php
-// includes/class-api-client.php
 
 class Engel_API_Client {
-    private $token_option = 'engel_api_token';
-    private $base_url = 'https://drop.novaengel.com/api';
 
-    public function login($user, $password) {
-        $response = wp_remote_post("{$this->base_url}/login", [
-            'headers' => ['Content-Type' => 'application/json'],
-            'body' => json_encode(['user' => $user, 'password' => $password]),
-            'timeout' => 20,
-        ]);
+	private $base_url;
+	private $api_key;
 
-        if (is_wp_error($response)) {
-            return new WP_Error('api_error', 'Error al conectar: ' . $response->get_error_message());
-        }
+	public function __construct($base_url, $api_key) {
+		$this->base_url = rtrim($base_url, '/');
+		$this->api_key = $api_key;
+	}
 
-        $body = json_decode(wp_remote_retrieve_body($response), true);
-        if (isset($body['token'])) {
-            update_option($this->token_option, $body['token']);
-            return true;
-        }
+	private function request($endpoint) {
+		$url = $this->base_url . '/' . ltrim($endpoint, '/');
 
-        return new WP_Error('login_failed', 'Login incorrecto o respuesta inválida.');
-    }
+		$response = wp_remote_get($url, [
+			'headers' => [
+				'Authorization' => 'Bearer ' . $this->api_key,
+				'Accept'        => 'application/json'
+			],
+			'timeout' => 15,
+		]);
 
-    public function get_products() {
-        $token = get_option($this->token_option);
-        if (!$token) return new WP_Error('no_token', 'Token no disponible.');
+		if (is_wp_error($response)) {
+			return $response;
+		}
 
-        $response = wp_remote_get("{$this->base_url}/products", [
-            'headers' => [
-                'Authorization' => 'Bearer ' . $token,
-                'Accept' => 'application/json'
-            ],
-            'timeout' => 30,
-        ]);
+		$code = wp_remote_retrieve_response_code($response);
+		$body = wp_remote_retrieve_body($response);
 
-        if (is_wp_error($response)) {
-            return $response;
-        }
+		if ($code !== 200) {
+			return new WP_Error('api_error', "Error de API: $code");
+		}
 
-        $body = json_decode(wp_remote_retrieve_body($response), true);
-        return $body;
-    
-    public function fetch_all_products() {
-        $token = get_option($this->token_option);
-        if (!$token) {
-            return new WP_Error('no_token', 'Token de API no encontrado.');
-        }
+		$data = json_decode($body, true);
 
-        $response = wp_remote_get("{$this->base_url}/products", [
-            'headers' => [
-                'Authorization' => 'Bearer ' . $token,
-                'Content-Type'  => 'application/json'
-            ],
-            'timeout' => 20,
-        ]);
+		if (json_last_error() !== JSON_ERROR_NONE) {
+			return new WP_Error('json_error', 'Error al decodificar JSON.');
+		}
 
-        if (is_wp_error($response)) {
-            return new WP_Error('api_error', 'Error al conectar: ' . $response->get_error_message());
-        }
+		return $data;
+	}
 
-        $body = json_decode(wp_remote_retrieve_body($response), true);
-
-        if (!is_array($body)) {
-            return new WP_Error('invalid_response', 'Respuesta inválida al obtener productos.');
-        }
-
-        return $body;
-    }
-
+	public function fetch_all_products() {
+		return $this->request('/products');
+	}
 }
