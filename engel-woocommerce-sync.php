@@ -250,40 +250,6 @@ function engel_sync_settings_page() {
         echo '<div class="notice notice-success is-dismissible"><p>Configuración guardada correctamente.</p></div>';
     }
 
-    $elements_per_page = get_option('engel_elements_per_page', 10);
-    $max_pages = get_option('engel_max_pages', 5);
-    $frequency = get_option('engel_sync_frequency', 'hourly');
-    ?>
-    <div class="wrap">
-        <h1>Configuración de Paginación - Engel Sync</h1>
-        <form method="post">
-            <?php wp_nonce_field('engel_sync_settings_nonce'); ?>
-            <table class="form-table">
-                <tr>
-                    <th scope="row"><label for="engel_elements_per_page">Productos por página</label></th>
-                    <td><input name="engel_elements_per_page" type="number" id="engel_elements_per_page" value="<?php echo esc_attr($elements_per_page); ?>" min="1" max="1000" required></td>
-                </tr>
-                <tr>
-                    <th scope="row"><label for="engel_max_pages">Número máximo de páginas</label></th>
-                    <td><input name="engel_max_pages" type="number" id="engel_max_pages" value="<?php echo esc_attr($max_pages); ?>" min="1" max="100" required></td>
-                </tr>
-                <tr>
-                    <th scope="row"><label for="engel_sync_frequency">Frecuencia de sincronización automática</label></th>
-                    <td>
-                        <select name="engel_sync_frequency" id="engel_sync_frequency">
-                            <option value="hourly" <?php selected($frequency, 'hourly'); ?>>Cada hora</option>
-                            <option value="twicedaily" <?php selected($frequency, 'twicedaily'); ?>>Dos veces al día</option>
-                            <option value="daily" <?php selected($frequency, 'daily'); ?>>Una vez al día</option>
-                        </select>
-                    </td>
-                </tr>
-            </table>
-            <?php submit_button(); ?>
-        </form>
-    </div>
-    <?php
-}
-
 function engel_schedule_cron_event() {
     if (wp_next_scheduled('engel_sync_cron_event')) {
         wp_clear_scheduled_hook('engel_sync_cron_event');
