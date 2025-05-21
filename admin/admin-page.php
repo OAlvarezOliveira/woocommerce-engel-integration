@@ -31,7 +31,7 @@ function engel_sync_dashboard() {
         update_option('engel_api_password', $pass);
 
         // Intentar login para validación
-        $api = new Engel_API_Client();
+        $api = new Engel_API_Client($user, $pass);
         $token = $api->login($user, $pass);
         if ($token && !is_wp_error($token)) {
             echo '<div class="updated"><p>Credenciales guardadas y validadas correctamente.</p></div>';
