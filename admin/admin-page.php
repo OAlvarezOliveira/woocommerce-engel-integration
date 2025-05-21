@@ -33,7 +33,7 @@ function engel_sync_dashboard() {
         // Intentar login para validación
         $api = new Engel_API_Client();
         $token = $api->login($user, $pass);
-        if ($token) {
+        if ($token && !is_wp_error($token)) {
             echo '<div class="updated"><p>Credenciales guardadas y validadas correctamente.</p></div>';
             update_option('engel_api_token', $token);
         } else {
@@ -41,22 +41,12 @@ function engel_sync_dashboard() {
         }
     }
 
-    // Procesar logout
-    if (isset($_POST['engel_logout'])) {
-        $api = new Engel_API_Client();
-        $logout_result = $api->logout(get_option('engel_api_token'));
-        if ($logout_result) {
-            delete_option('engel_api_token');
-            echo '<div class="updated"><p>Sesión cerrada correctamente.</p></div>';
-        } else {
-            echo '<div class="notice notice-error"><p>Error al cerrar sesión.</p></div>';
-        }
-    }
-
-    // Mostrar token actual si existe
+    // Mostrar token actual si existe y es válido
     $saved_token = get_option('engel_api_token', '');
-    if ($saved_token) {
+    if (!empty($saved_token) && !is_wp_error($saved_token)) {
         echo '<div class="notice notice-success"><p><strong>Token actual:</strong> ' . esc_html($saved_token) . '</p></div>';
+    } elseif (is_wp_error($saved_token)) {
+        echo '<div class="notice notice-error"><p>Error al obtener el token: ' . esc_html($saved_token->get_error_message()) . '</p></div>';
     }
 
     // Procesar sincronización de productos
@@ -73,6 +63,17 @@ function engel_sync_dashboard() {
         $stock = $api->fetch_stock_updates();
         Engel_Product_Sync::update_stock_only($stock);
         echo '<div class="updated"><p>Stock actualizado correctamente.</p></div>';
+    }
+
+    // Procesar logout
+    if (isset($_POST['engel_logout'])) {
+        $token = get_option('engel_api_token', '');
+        if (!empty($token) && !is_wp_error($token)) {
+            $api = new Engel_API_Client();
+            $api->logout($token);
+            delete_option('engel_api_token');
+            echo '<div class="updated"><p>Sesión cerrada correctamente.</p></div>';
+        }
     }
 
     // Procesar borrado de historial
@@ -94,18 +95,12 @@ function engel_sync_dashboard() {
     echo '<p><input type="submit" name="engel_save_credentials" class="button button-primary" value="Guardar Credenciales"></p>';
     echo '</form>';
 
-    // Botón logout si hay token
-    if ($saved_token) {
-        echo '<form method="post" style="margin-top:10px;">';
-        echo '<input type="submit" name="engel_logout" class="button" value="Cerrar Sesión">';
-        echo '</form>';
-    }
-
     // Botones de sincronización
     echo '<h2>Sincronización</h2>';
     echo '<form method="post">';
     echo '<input type="submit" name="engel_sync_all_products" class="button button-primary" value="Sincronizar Productos"> ';
-    echo '<input type="submit" name="engel_update_stock" class="button button-secondary" value="Actualizar Stock">';
+    echo '<input type="submit" name="engel_update_stock" class="button button-secondary" value="Actualizar Stock"> ';
+    echo '<input type="submit" name="engel_logout" class="button" value="Cerrar Sesión">';
     echo '</form>';
 
     // Historial
