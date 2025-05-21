@@ -13,72 +13,104 @@ function engel_sync_admin_menu() {
         'dashicons-update',       // Icon
         56                        // Position
     );
-
-    add_submenu_page(
-        'engel-sync',
-        'Sincronizar Productos',
-        'Sincronizar Productos',
-        'manage_options',
-        'engel-sync-products',
-        'engel_sync_products_callback'
-    );
-
-    add_submenu_page(
-        'engel-sync',
-        'Actualizar Stock',
-        'Actualizar Stock',
-        'manage_options',
-        'engel-sync-stock',
-        'engel_sync_stock_callback'
-    );
-
-    add_submenu_page(
-        'engel-sync',
-        'Historial de Sincronización',
-        'Historial de Sincronización',
-        'manage_options',
-        'engel-sync-log',
-        'engel_sync_log_callback'
-    );
 }
 
 function engel_sync_dashboard() {
-    echo '<div class="wrap"><h1>Engel Sync</h1><p>Usa las opciones del menú para sincronizar productos o actualizar stock.</p></div>';
-}
+    global $wpdb;
+    $log_table = $wpdb->prefix . 'engel_sync_log';
 
-function engel_sync_products_callback() {
+    $login_test_result = '';
+    $token = '';
+
+    // Procesar formulario de credenciales
+    if (isset($_POST['engel_save_credentials'])) {
+        check_admin_referer('engel_sync_credentials');
+        $user = sanitize_text_field($_POST['engel_api_user']);
+        $pass = sanitize_text_field($_POST['engel_api_password']);
+        update_option('engel_api_user', $user);
+        update_option('engel_api_password', $pass);
+
+        // Intentar login para validación
+        $api = new Engel_API_Client();
+        $token = $api->login($user, $pass);
+        if ($token) {
+            echo '<div class="updated"><p>Credenciales guardadas y validadas correctamente.</p></div>';
+            update_option('engel_api_token', $token);
+        } else {
+            echo '<div class="notice notice-error"><p>Credenciales guardadas, pero falló la validación contra la API.</p></div>';
+        }
+    }
+
+    // Procesar logout
+    if (isset($_POST['engel_logout'])) {
+        $api = new Engel_API_Client();
+        $logout_result = $api->logout(get_option('engel_api_token'));
+        if ($logout_result) {
+            delete_option('engel_api_token');
+            echo '<div class="updated"><p>Sesión cerrada correctamente.</p></div>';
+        } else {
+            echo '<div class="notice notice-error"><p>Error al cerrar sesión.</p></div>';
+        }
+    }
+
+    // Mostrar token actual si existe
+    $saved_token = get_option('engel_api_token', '');
+    if ($saved_token) {
+        echo '<div class="notice notice-success"><p><strong>Token actual:</strong> ' . esc_html($saved_token) . '</p></div>';
+    }
+
+    // Procesar sincronización de productos
     if (isset($_POST['engel_sync_all_products'])) {
         $api = new Engel_API_Client();
         $products = $api->fetch_all_products();
         Engel_Product_Sync::sync_all_products($products);
         echo '<div class="updated"><p>Productos sincronizados correctamente.</p></div>';
     }
-    echo '<div class="wrap"><h1>Sincronizar Productos</h1><form method="post"><input type="submit" name="engel_sync_all_products" class="button button-primary" value="Sincronizar Ahora"></form></div>';
-}
 
-function engel_sync_stock_callback() {
+    // Procesar actualización de stock
     if (isset($_POST['engel_update_stock'])) {
         $api = new Engel_API_Client();
         $stock = $api->fetch_stock_updates();
         Engel_Product_Sync::update_stock_only($stock);
         echo '<div class="updated"><p>Stock actualizado correctamente.</p></div>';
     }
-    echo '<div class="wrap"><h1>Actualizar Stock</h1><form method="post"><input type="submit" name="engel_update_stock" class="button button-secondary" value="Actualizar Stock Ahora"></form></div>';
-}
 
-function engel_sync_log_callback() {
-    global $wpdb;
-    $log_table = $wpdb->prefix . 'engel_sync_log';
-
-    // Borrar historial si se solicitó
+    // Procesar borrado de historial
     if (isset($_POST['engel_clear_log']) && check_admin_referer('engel_clear_log_action')) {
         $wpdb->query("DELETE FROM $log_table");
         echo '<div class="updated"><p>Historial de sincronización borrado.</p></div>';
     }
 
-    $logs = $wpdb->get_results("SELECT * FROM $log_table ORDER BY synced_at DESC LIMIT 50");
+    // Mostrar interfaz
+    echo '<div class="wrap">';
+    echo '<h1>Engel Sync</h1>';
 
-    echo '<div class="wrap"><h1>Historial de Sincronización</h1>';
+    // Formulario de credenciales
+    echo '<h2>Credenciales API</h2>';
+    echo '<form method="post">';
+    wp_nonce_field('engel_sync_credentials');
+    echo '<table class="form-table"><tr><th scope="row">Usuario</th><td><input type="text" name="engel_api_user" value="' . esc_attr(get_option('engel_api_user', '')) . '" class="regular-text"></td></tr>';
+    echo '<tr><th scope="row">Contraseña</th><td><input type="password" name="engel_api_password" value="' . esc_attr(get_option('engel_api_password', '')) . '" class="regular-text"></td></tr></table>';
+    echo '<p><input type="submit" name="engel_save_credentials" class="button button-primary" value="Guardar Credenciales"></p>';
+    echo '</form>';
+
+    // Botón logout si hay token
+    if ($saved_token) {
+        echo '<form method="post" style="margin-top:10px;">';
+        echo '<input type="submit" name="engel_logout" class="button" value="Cerrar Sesión">';
+        echo '</form>';
+    }
+
+    // Botones de sincronización
+    echo '<h2>Sincronización</h2>';
+    echo '<form method="post">';
+    echo '<input type="submit" name="engel_sync_all_products" class="button button-primary" value="Sincronizar Productos"> ';
+    echo '<input type="submit" name="engel_update_stock" class="button button-secondary" value="Actualizar Stock">';
+    echo '</form>';
+
+    // Historial
+    $logs = $wpdb->get_results("SELECT * FROM $log_table ORDER BY synced_at DESC LIMIT 50");
+    echo '<h2>Historial de Sincronización</h2>';
     echo '<form method="post">';
     wp_nonce_field('engel_clear_log_action');
     echo '<input type="submit" name="engel_clear_log" class="button button-danger" value="Borrar Historial">';
@@ -97,5 +129,6 @@ function engel_sync_log_callback() {
     } else {
         echo '<p>No hay registros de sincronización aún.</p>';
     }
+
     echo '</div>';
 }
