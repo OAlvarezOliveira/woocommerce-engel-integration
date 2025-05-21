@@ -43,5 +43,32 @@ class Engel_API_Client {
 
         $body = json_decode(wp_remote_retrieve_body($response), true);
         return $body;
+    
+    public function fetch_all_products() {
+        $token = get_option($this->token_option);
+        if (!$token) {
+            return new WP_Error('no_token', 'Token de API no encontrado.');
+        }
+
+        $response = wp_remote_get("{$this->base_url}/products", [
+            'headers' => [
+                'Authorization' => 'Bearer ' . $token,
+                'Content-Type'  => 'application/json'
+            ],
+            'timeout' => 20,
+        ]);
+
+        if (is_wp_error($response)) {
+            return new WP_Error('api_error', 'Error al conectar: ' . $response->get_error_message());
+        }
+
+        $body = json_decode(wp_remote_retrieve_body($response), true);
+
+        if (!is_array($body)) {
+            return new WP_Error('invalid_response', 'Respuesta inválida al obtener productos.');
+        }
+
+        return $body;
     }
+
 }
