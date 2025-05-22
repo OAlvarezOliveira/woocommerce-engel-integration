@@ -1,61 +1,26 @@
-=== Engel WooCommerce Sync ===
-Contributors: OAlvarezOliveira
-Tags: woocommerce, sync, csv, stock, api
-Requires at least: 5.0
-Tested up to: 6.4
-Stable tag: 1.1
-Requires PHP: 7.4
-License: GPLv2 or later
-License URI: https://www.gnu.org/licenses/gpl-2.0.html
+# Engel Sync Plugin for WordPress
 
-Sincroniza productos de Nova Engel con WooCommerce. Permite login, logout, sincronización total o solo stock y exportar CSV de productos.
+Este plugin permite sincronizar productos desde una API externa (Engel) directamente con tu tienda WordPress/WooCommerce.
 
-== Description ==
+## Características
 
-Engel WooCommerce Sync es un plugin para WordPress que sincroniza productos desde la API de Nova Engel hacia WooCommerce. 
-Incluye funcionalidades para:
+- Guardado de configuración de API URL y token.
+- Sincronización completa de productos desde la API.
+- Actualización de stock de productos de forma independiente.
+- Registro básico de sincronizaciones en la base de datos (`wp_engel_sync_log`).
 
-* Login/logout con la API de Nova Engel.
-* Sincronización completa de productos.
-* Sincronización solo de stock.
-* Exportación de productos a CSV para descarga.
-* Panel administrativo sencillo para gestionar todas estas funciones.
+## Requisitos
 
-== Installation ==
+- WordPress 5.0 o superior
+- WooCommerce instalado y activo
+- PHP 7.4 o superior
+- Acceso a una API compatible (Engel) con endpoints de productos y stock
 
-1. Subir la carpeta `engel-sync` al directorio `/wp-content/plugins/`.
-2. Activar el plugin desde el panel de administración de WordPress.
-3. Ir a "Engel Sync" en el menú de administración.
-4. Ingresar usuario y contraseña para conectarse a Nova Engel.
-5. Usar los botones para sincronizar o exportar productos.
+## Instalación
 
-== Frequently Asked Questions ==
+1. Clona o descarga este repositorio en el directorio `wp-content/plugins/engel-sync`:
 
-= ¿Qué hace este plugin? =
+   ```bash
+   git clone https://github.com/tu-usuario/engel-sync.git wp-content/plugins/engel-sync
 
-Sincroniza productos y stock de Nova Engel con WooCommerce y exporta CSV.
-
-= ¿Necesito configurar algo más? =
-
-Solo usuario y contraseña válidos para la API Nova Engel.
-
-== Screenshots ==
-
-1. Página de administración del plugin con formulario de login y botones de acción.
-
-== Changelog ==
-
-= 1.1 =
-* Mejoras en manejo de token.
-* Corrección de bugs.
-
-= 1.0 =
-* Versión inicial con login, sincronización y exportación CSV.
-
-== License ==
-
-== License ==
-
-GPLv2 or later.
-License URI: https://www.gnu.org/licenses/gpl-2.0.html
  
