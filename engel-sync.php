@@ -1,12 +1,16 @@
-
 <?php
 /*
 Plugin Name: Engel Sync
-Description: Sincroniza productos y stock desde Nova Engel.
+Description: Sincroniza productos con el API de Nova Engel.
 Version: 1.0
-Author: Tu Nombre
+Author: OpenAI
 */
 
 require_once plugin_dir_path(__FILE__) . 'includes/class-engel-api-client.php';
-require_once plugin_dir_path(__FILE__) . 'includes/class-engel-product-sync.php';
+
+function engel_sync_init() {
+    // Inicializar si es necesario
+}
+add_action('init', 'engel_sync_init');
+
 require_once plugin_dir_path(__FILE__) . 'admin/admin-page.php';

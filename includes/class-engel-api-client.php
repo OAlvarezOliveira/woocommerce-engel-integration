@@ -1,14 +1,11 @@
-
 <?php
 
 class Engel_API_Client {
-    private $base_url = 'https://drop.novaengel.com/api/';
-
-    public function login($user, $pass) {
-        $response = wp_remote_post($this->base_url . 'login', [
-            'body' => json_encode(['Usuario' => $user, 'Password' => $pass]),
+    public function login($username, $password) {
+        $response = wp_remote_post('https://drop.novaengel.com/api/login', [
+            'method' => 'POST',
             'headers' => ['Content-Type' => 'application/json'],
-            'timeout' => 20,
+            'body' => json_encode(['Usuario' => $username, 'Password' => $password]),
         ]);
 
         if (is_wp_error($response)) {
@@ -16,10 +13,11 @@ class Engel_API_Client {
         }
 
         $body = json_decode(wp_remote_retrieve_body($response), true);
-        if (isset($body['Token'])) {
-            return $body['Token'];
-        }
 
-        return new WP_Error('login_failed', 'No se pudo obtener el token de la API.');
+        if (isset($body['Token'])) {
+            return sanitize_text_field($body['Token']);
+        } else {
+            return new WP_Error('login_failed', 'Token no recibido');
+        }
     }
 }

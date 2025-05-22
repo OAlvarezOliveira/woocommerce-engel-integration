@@ -1,4 +1,3 @@
-
 <?php
 
 function engel_sync_admin_page() {
@@ -23,12 +22,12 @@ function engel_sync_admin_page() {
         <?php
         $token = get_option('engel_api_token');
 
-        if ( is_wp_error( $token ) ) {
-            echo '<p style="color: red;">Error: ' . esc_html( $token->get_error_message() ) . '</p>';
-        } elseif ( ! empty( $token ) ) {
-            echo '<p><strong>Token actual:</strong> ' . esc_html( $token ) . '</p>';
+        if ($token instanceof WP_Error) {
+            echo '<p style="color:red;">Error de login: ' . esc_html($token->get_error_message()) . '</p>';
+        } elseif (!empty($token)) {
+            echo '<p style="color:green;">Token actual: ' . esc_html($token) . '</p>';
         } else {
-            echo '<p style="color: red;">Token no disponible.</p>';
+            echo '<p style="color:gray;">No hay token guardado.</p>';
         }
         ?>
     </div>
@@ -42,26 +41,16 @@ add_action('admin_menu', function () {
 add_action('admin_init', function () {
     if (!isset($_POST['engel_sync_nonce']) || !wp_verify_nonce($_POST['engel_sync_nonce'], 'engel_sync_action')) return;
 
+    require_once plugin_dir_path(__FILE__) . '../includes/class-engel-api-client.php';
+
     $client = new Engel_API_Client();
 
     if (isset($_POST['engel_login'])) {
         $token = $client->login(sanitize_text_field($_POST['engel_user']), sanitize_text_field($_POST['engel_pass']));
-        if (!is_wp_error($token)) {
-            update_option('engel_api_token', $token);
-        } else {
-            update_option('engel_api_token', $token); // save WP_Error to handle later
-        }
+        update_option('engel_api_token', $token); // Puede ser string o WP_Error
     }
 
     if (isset($_POST['engel_logout'])) {
         delete_option('engel_api_token');
-    }
-
-    if (isset($_POST['engel_sync'])) {
-        // Aquí se llamaría a la función para sincronizar productos
-    }
-
-    if (isset($_POST['engel_stock'])) {
-        // Aquí se llamaría a la función para actualizar stock
     }
 });
