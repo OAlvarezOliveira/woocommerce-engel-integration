@@ -65,7 +65,9 @@ class Engel_Product_Sync {
         $table_name = $wpdb->prefix . 'engel_products';
 
         foreach ($stock_data as $item) {
-            if (!isset($item['item_id']) || !isset($item['stock'])) continue;
+            if (!isset($item['item_id']) || !isset($item['stock'])) {
+                continue;
+            }
 
             $wpdb->update(
                 $table_name,
