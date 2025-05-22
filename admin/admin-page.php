@@ -1,20 +1,21 @@
 <?php
+// admin/admin-page.php
 
 function engel_sync_dashboard() {
-    $api_url = get_option('engel_api_url', '');
-    $api_token = get_option('engel_api_token', '');
+    $username = get_option('engel_api_username', '');
+    $password = get_option('engel_api_password', '');
 
     if (isset($_POST['engel_sync_form'])) {
-        $api_url = sanitize_text_field($_POST['engel_api_url']);
-        $api_token = sanitize_text_field($_POST['engel_api_token']);
+        $username = sanitize_text_field($_POST['engel_api_username']);
+        $password = sanitize_text_field($_POST['engel_api_password']);
 
-        update_option('engel_api_url', $api_url);
-        update_option('engel_api_token', $api_token);
+        update_option('engel_api_username', $username);
+        update_option('engel_api_password', $password);
 
         echo '<div class="notice notice-success is-dismissible"><p>Configuración guardada.</p></div>';
     }
 
-    $api = new Engel_API_Client($api_url, $api_token);
+    $api = new Engel_API_Client('https://drop.novaengel.com/api/', $username, $password);
 
     if (isset($_POST['sync_all_products'])) {
         $products = $api->fetch_all_products();
@@ -35,7 +36,6 @@ function engel_sync_dashboard() {
             echo '<div class="notice notice-error is-dismissible"><p>Error al actualizar stock: ' . esc_html($stock_data->get_error_message()) . '</p></div>';
         }
     }
-
     ?>
     <div class="wrap">
         <h1>Engel Sync</h1>
@@ -43,12 +43,12 @@ function engel_sync_dashboard() {
             <input type="hidden" name="engel_sync_form" value="1">
             <table class="form-table">
                 <tr>
-                    <th scope="row"><label for="engel_api_url">API URL</label></th>
-                    <td><input name="engel_api_url" type="text" id="engel_api_url" value="<?php echo esc_attr($api_url); ?>" class="regular-text" required></td>
+                    <th scope="row"><label for="engel_api_username">Usuario API</label></th>
+                    <td><input name="engel_api_username" type="text" id="engel_api_username" value="<?php echo esc_attr($username); ?>" class="regular-text" required></td>
                 </tr>
                 <tr>
-                    <th scope="row"><label for="engel_api_token">Token</label></th>
-                    <td><input name="engel_api_token" type="text" id="engel_api_token" value="<?php echo esc_attr($api_token); ?>" class="regular-text" required></td>
+                    <th scope="row"><label for="engel_api_password">Contraseña API</label></th>
+                    <td><input name="engel_api_password" type="password" id="engel_api_password" value="<?php echo esc_attr($password); ?>" class="regular-text" required></td>
                 </tr>
             </table>
             <?php submit_button('Guardar Configuración'); ?>
