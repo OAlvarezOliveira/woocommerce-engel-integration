@@ -8,6 +8,9 @@ Author: ChatGPT
 
 if (!defined('ABSPATH')) exit;
 
+log_engel_sync('Iniciando sincronización manual con cron.');
+
+
 // Registrar log en la tabla
 function log_engel_sync($args = []) {
     global $wpdb;
