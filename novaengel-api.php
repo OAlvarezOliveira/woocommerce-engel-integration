@@ -2,14 +2,11 @@
 /*
 Plugin Name: Engel Sync
 Description: Sincroniza productos desde la API de NovaEngel automáticamente mediante cron y guarda logs de sincronización.
-Version: 1.3.2
+Version: 1.4.0
 Author: ChatGPT
 */
 
 if (!defined('ABSPATH')) exit;
-
-log_engel_sync('Iniciando sincronización manual con cron.');
-
 
 // Registrar log en la tabla
 function log_engel_sync($args = []) {
@@ -55,7 +52,6 @@ function engel_cron_deactivate() {
     wp_clear_scheduled_hook('engel_sync_cron_event');
 }
 
-// Asociar el evento al callback
 add_action('engel_sync_cron_event', 'engel_sync_products_cron');
 
 // Obtener token de la API
@@ -75,7 +71,8 @@ function engel_get_token() {
 
 // Función principal de sincronización
 function engel_sync_products_cron() {
-    if (!defined('DOING_CRON')) return;
+    // Permitimos ejecución desde cron, WP-CLI o botón manual
+    if (!defined('DOING_CRON') && !defined('WP_CLI') && !isset($_GET['engel_manual_sync'])) return;
 
     $start_time = microtime(true);
     $total = $success = $errors = 0;
@@ -166,6 +163,14 @@ function engel_admin_page() {
         update_option('engel_api_password', sanitize_text_field($_POST['engel_api_password']));
         echo '<div class="updated"><p>Credenciales guardadas.</p></div>';
     }
+
+    // Lanzar sincronización manual
+    if (isset($_POST['engel_manual_sync_now'])) {
+        $_GET['engel_manual_sync'] = true; // simulamos variable GET
+        engel_sync_products_cron();
+        echo '<div class="updated"><p>Sincronización manual completada.</p></div>';
+    }
+
     ?>
     <div class="wrap">
         <h1>Configuración de NovaEngel</h1>
@@ -180,7 +185,10 @@ function engel_admin_page() {
                     <td><input type="password" name="engel_api_password" value="<?php echo esc_attr(get_option('engel_api_password')); ?>" class="regular-text" /></td>
                 </tr>
             </table>
-            <p class="submit"><input type="submit" name="engel_save_settings" class="button-primary" value="Guardar Cambios" /></p>
+            <p class="submit">
+                <input type="submit" name="engel_save_settings" class="button-primary" value="Guardar Cambios" />
+                <input type="submit" name="engel_manual_sync_now" class="button-secondary" value="Sincronizar ahora" />
+            </p>
         </form>
     </div>
     <?php
