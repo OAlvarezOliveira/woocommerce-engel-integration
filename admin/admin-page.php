@@ -22,10 +22,13 @@ function engel_sync_admin_page() {
 
         <?php
         $token = get_option('engel_api_token');
-        if (!is_wp_error($token) && !empty($token)) {
-            echo '<p>Token actual: ' . esc_html($token) . '</p>';
+
+        if ( is_wp_error( $token ) ) {
+            echo '<p style="color: red;">Error: ' . esc_html( $token->get_error_message() ) . '</p>';
+        } elseif ( ! empty( $token ) ) {
+            echo '<p><strong>Token actual:</strong> ' . esc_html( $token ) . '</p>';
         } else {
-            echo '<p style="color: red;">Token no disponible o hubo un error.</p>';
+            echo '<p style="color: red;">Token no disponible.</p>';
         }
         ?>
     </div>
@@ -46,11 +49,19 @@ add_action('admin_init', function () {
         if (!is_wp_error($token)) {
             update_option('engel_api_token', $token);
         } else {
-            update_option('engel_api_token', $token); // Save error to handle it later
+            update_option('engel_api_token', $token); // save WP_Error to handle later
         }
     }
 
     if (isset($_POST['engel_logout'])) {
         delete_option('engel_api_token');
+    }
+
+    if (isset($_POST['engel_sync'])) {
+        // Aquí se llamaría a la función para sincronizar productos
+    }
+
+    if (isset($_POST['engel_stock'])) {
+        // Aquí se llamaría a la función para actualizar stock
     }
 });
