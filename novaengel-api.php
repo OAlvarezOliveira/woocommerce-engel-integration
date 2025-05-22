@@ -2,18 +2,18 @@
 /*
 Plugin Name: Engel Sync
 Description: Sincroniza productos desde la API de NovaEngel automáticamente mediante cron y guarda logs de sincronización.
-Version: 1.2
+Version: 1.3
 Author: ChatGPT
 */
 
 if (!defined('ABSPATH')) exit;
 
-// Logger
+// Función para registrar logs
 function log_engel_sync($args = []) {
     global $wpdb;
 
     $defaults = [
-        'type'             => 'full', // 'full' o 'stock'
+        'type'             => 'full',
         'total_items'      => 0,
         'success_items'    => 0,
         'error_items'      => 0,
@@ -40,7 +40,7 @@ function log_engel_sync($args = []) {
     );
 }
 
-// Activar/desactivar cron
+// Activación y desactivación del cron
 register_activation_hook(__FILE__, 'engel_cron_activate');
 register_deactivation_hook(__FILE__, 'engel_cron_deactivate');
 
@@ -54,7 +54,9 @@ function engel_cron_deactivate() {
     wp_clear_scheduled_hook('engel_daily_sync_event');
 }
 
-// Token
+add_action('engel_daily_sync_event', 'engel_sync_products_cron');
+
+// Obtener token
 function engel_get_token() {
     $user = get_option('engel_api_user');
     $password = get_option('engel_api_password');
@@ -70,8 +72,6 @@ function engel_get_token() {
 }
 
 // Sincronización
-add_action('engel_daily_sync_event', 'engel_sync_products_cron');
-
 function engel_sync_products_cron() {
     if (!defined('DOING_CRON')) return;
 
@@ -81,7 +81,6 @@ function engel_sync_products_cron() {
 
     $token = engel_get_token();
     if (!$token) {
-        error_log("Engel Sync: No se pudo obtener el token.");
         log_engel_sync([
             'error_items' => 1,
             'error_log' => 'No se pudo obtener token'
@@ -151,13 +150,12 @@ function engel_sync_products_cron() {
         'error_log'        => $errors ? implode(', ', array_slice($error_log, 0, 50)) : null,
         'duration_seconds' => round(microtime(true) - $start_time),
     ]);
-
-    error_log("Engel Sync: Sincronización completa. Total: $total, Éxito: $success, Errores: $errors");
 }
 
-// Página admin
+// Panel de administración
 add_action('admin_menu', function() {
     add_menu_page('NovaEngel API', 'NovaEngel API', 'manage_options', 'novaengel-api', 'engel_admin_page');
+    add_submenu_page('novaengel-api', 'Logs de sincronización', 'Logs', 'manage_options', 'novaengel-logs', 'engel_logs_page');
 });
 
 function engel_admin_page() {
@@ -182,6 +180,42 @@ function engel_admin_page() {
             </table>
             <p class="submit"><input type="submit" name="engel_save_settings" class="button-primary" value="Guardar Cambios" /></p>
         </form>
+    </div>
+    <?php
+}
+
+function engel_logs_page() {
+    global $wpdb;
+    $logs = $wpdb->get_results("SELECT * FROM {$wpdb->prefix}engel_sync_log ORDER BY synced_at DESC LIMIT 50");
+    ?>
+    <div class="wrap">
+        <h1>Logs de Sincronización</h1>
+        <table class="widefat fixed striped">
+            <thead>
+                <tr>
+                    <th>Fecha</th>
+                    <th>Tipo</th>
+                    <th>Total</th>
+                    <th>Correctos</th>
+                    <th>Errores</th>
+                    <th>Duración (s)</th>
+                    <th>Error Log</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($logs as $log): ?>
+                <tr>
+                    <td><?php echo esc_html($log->synced_at); ?></td>
+                    <td><?php echo esc_html($log->type); ?></td>
+                    <td><?php echo esc_html($log->total_items); ?></td>
+                    <td><?php echo esc_html($log->success_items); ?></td>
+                    <td><?php echo esc_html($log->error_items); ?></td>
+                    <td><?php echo esc_html($log->duration_seconds); ?></td>
+                    <td><?php echo esc_html(wp_trim_words($log->error_log, 20, '...')); ?></td>
+                </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
     </div>
     <?php
 }
