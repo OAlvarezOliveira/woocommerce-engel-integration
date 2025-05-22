@@ -2,7 +2,7 @@
 /*
 Plugin Name: Engel Sync
 Description: Sincroniza productos desde la API de NovaEngel automáticamente mediante cron y guarda logs de sincronización.
-Version: 1.3.1
+Version: 1.3.2
 Author: ChatGPT
 */
 
