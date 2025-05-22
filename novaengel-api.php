@@ -2,13 +2,13 @@
 /*
 Plugin Name: Engel Sync
 Description: Sincroniza productos desde la API de NovaEngel automáticamente mediante cron y guarda logs de sincronización.
-Version: 1.3
+Version: 1.3.1
 Author: ChatGPT
 */
 
 if (!defined('ABSPATH')) exit;
 
-// Función para registrar logs
+// Registrar log en la tabla
 function log_engel_sync($args = []) {
     global $wpdb;
 
@@ -34,29 +34,28 @@ function log_engel_sync($args = []) {
             'error_log'        => $data['error_log'],
             'duration_seconds' => $data['duration_seconds'],
         ],
-        [
-            '%s', '%s', '%d', '%d', '%d', '%s', '%d'
-        ]
+        ['%s', '%s', '%d', '%d', '%d', '%s', '%d']
     );
 }
 
-// Activación y desactivación del cron
+// Activar y desactivar cron
 register_activation_hook(__FILE__, 'engel_cron_activate');
 register_deactivation_hook(__FILE__, 'engel_cron_deactivate');
 
 function engel_cron_activate() {
-    if (!wp_next_scheduled('engel_daily_sync_event')) {
-        wp_schedule_event(time(), 'daily', 'engel_daily_sync_event');
+    if (!wp_next_scheduled('engel_sync_cron_event')) {
+        wp_schedule_event(time(), 'daily', 'engel_sync_cron_event');
     }
 }
 
 function engel_cron_deactivate() {
-    wp_clear_scheduled_hook('engel_daily_sync_event');
+    wp_clear_scheduled_hook('engel_sync_cron_event');
 }
 
-add_action('engel_daily_sync_event', 'engel_sync_products_cron');
+// Asociar el evento al callback
+add_action('engel_sync_cron_event', 'engel_sync_products_cron');
 
-// Obtener token
+// Obtener token de la API
 function engel_get_token() {
     $user = get_option('engel_api_user');
     $password = get_option('engel_api_password');
@@ -71,7 +70,7 @@ function engel_get_token() {
     return $body['Token'] ?? false;
 }
 
-// Sincronización
+// Función principal de sincronización
 function engel_sync_products_cron() {
     if (!defined('DOING_CRON')) return;
 
@@ -152,7 +151,7 @@ function engel_sync_products_cron() {
     ]);
 }
 
-// Panel de administración
+// Interfaz de admin
 add_action('admin_menu', function() {
     add_menu_page('NovaEngel API', 'NovaEngel API', 'manage_options', 'novaengel-api', 'engel_admin_page');
     add_submenu_page('novaengel-api', 'Logs de sincronización', 'Logs', 'manage_options', 'novaengel-logs', 'engel_logs_page');
